@@ -2,7 +2,7 @@
 
 A free, team based web app for running systematic literature reviews in your e-government coursework. It covers a light PRISMA process plus Webster and Watson (concept matrix and snowballing), replacing the shared spreadsheet with a tool that has real ownership, a screening interface built for speed, and automatic PRISMA counts.
 
-Decisions already made: multi project platform (reusable across classes, teammates can create their own reviews), Google sign in, free subdomain first with a custom domain possible later, and no AI assisted screening at any point. All screening decisions are made by humans and attributed to them.
+Decisions already made: multi project platform (reusable across classes, teammates can create their own reviews), email and password sign in for now (Google sign in as an optional later addition), free subdomain first with a custom domain possible later, and no AI assisted screening at any point. All screening decisions are made by humans and attributed to them.
 
 ## 1. Why this beats the spreadsheet
 

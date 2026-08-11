@@ -7,7 +7,7 @@ Full product and build plan: [docs/PLAN.md](docs/PLAN.md). First time setup (Sup
 ## Stack
 
 - Next.js (App Router, TypeScript, Tailwind) on Vercel
-- Supabase: Postgres, auth (Google sign in), row level security, realtime
+- Supabase: Postgres, auth (email and password; Google sign in optional later), row level security, realtime
 - OpenAlex API for snowballing lookups (free, no key)
 
 ## Local development
@@ -22,4 +22,4 @@ The app runs without the environment variables set, but shows a "backend not con
 
 ## Status
 
-Phase 0: deployed skeleton with Google sign in. See docs/PLAN.md for the phase roadmap.
+Phase 0: deployed skeleton with email and password sign in. See docs/PLAN.md for the phase roadmap.
