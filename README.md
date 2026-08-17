@@ -22,4 +22,4 @@ The app runs without the environment variables set, but shows a "backend not con
 
 ## Status
 
-Phase 0: deployed skeleton with email and password sign in. See docs/PLAN.md for the phase roadmap.
+Phase 1: projects with invite codes, RIS/CSV import with automatic deduplication, record assignment, and the keyboard first title and abstract screening room. See docs/PLAN.md for the roadmap (full text stage, PRISMA diagram, snowballing, and the concept matrix are next).

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 type Mode = "signin" | "signup";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +31,8 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      window.location.assign("/dashboard");
+      router.push("/dashboard");
+      router.refresh();
     } else {
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
@@ -38,7 +41,8 @@ export default function LoginPage() {
         return;
       }
       if (data.session) {
-        window.location.assign("/dashboard");
+        router.push("/dashboard");
+        router.refresh();
       } else {
         // Email confirmation is enabled in Supabase settings.
         setMessage(

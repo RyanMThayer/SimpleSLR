@@ -44,7 +44,11 @@ In Supabase, open Authentication settings, then **URL Configuration**:
 
 Password sign in does not strictly need these, but future features (password reset emails, OAuth) do, so set them now while you are here.
 
-## 5. Test it
+## 5. Database schema (Phase 1, ~2 minutes)
+
+The review features (projects, import, screening) need tables in your database. In Supabase, open the **SQL Editor** (left sidebar), click **New query**, paste the entire contents of `supabase/migrations/0001_phase1.sql` from this repository, and click **Run**. It should end with "Success. No rows returned". The script is safe to run more than once.
+
+## 6. Test it
 
 Open your Vercel URL. You should see the SimpleSLR landing page with a Sign in button (not the yellow "backend not configured" notice). Click Sign in, choose "No account yet? Create one", and register with your email and a password of at least 6 characters. You should land on the dashboard showing your email address. If anything fails, copy the error shown and the URL you ended up on; that is enough to diagnose it.
 
