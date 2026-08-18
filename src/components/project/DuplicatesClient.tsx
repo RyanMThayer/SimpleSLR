@@ -21,6 +21,7 @@ export default function DuplicatesClient({
   const [pairs, setPairs] = useState<Pair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -103,15 +104,40 @@ export default function DuplicatesClient({
     setPairs((ps) => ps?.filter((p) => p !== pair) ?? ps);
   }
 
-  const recCard = (r: RecordRow) => (
+  const recCard = (r: RecordRow, showFull: boolean) => (
     <div className="flex-1 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-700">
       <p className="mb-1 font-medium text-zinc-900 dark:text-zinc-50">{r.title}</p>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
         {[r.authors, r.year, r.venue, r.source_label].filter(Boolean).join(" · ")}
         {r.doi && <> · {r.doi}</>}
       </p>
+      {r.abstract ? (
+        <p
+          className={`text-xs leading-5 text-zinc-600 dark:text-zinc-400 ${
+            showFull ? "" : "line-clamp-3"
+          }`}
+        >
+          {r.abstract}
+        </p>
+      ) : (
+        <p className="text-xs italic text-zinc-400 dark:text-zinc-500">
+          No abstract in the export.
+        </p>
+      )}
     </div>
   );
+
+  const pairKey = (p: Pair) => `${p.a.id}-${p.b.id}`;
+
+  function toggleExpanded(p: Pair) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      const key = pairKey(p);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   const btn =
     "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
@@ -158,12 +184,24 @@ export default function DuplicatesClient({
               key={`${p.a.id}-${p.b.id}`}
               className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
             >
-              <p className="mb-2 text-xs text-zinc-400">
-                Pair {i + 1} · title similarity {(p.sim * 100).toFixed(0)}%
-              </p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs text-zinc-400">
+                  Pair {i + 1} · title similarity {(p.sim * 100).toFixed(0)}%
+                </p>
+                {(p.a.abstract || p.b.abstract) && (
+                  <button
+                    onClick={() => toggleExpanded(p)}
+                    className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                  >
+                    {expanded.has(pairKey(p))
+                      ? "Collapse abstracts"
+                      : "Show full abstracts"}
+                  </button>
+                )}
+              </div>
               <div className="mb-3 flex flex-col gap-3 sm:flex-row">
-                {recCard(p.a)}
-                {recCard(p.b)}
+                {recCard(p.a, expanded.has(pairKey(p)))}
+                {recCard(p.b, expanded.has(pairKey(p)))}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
