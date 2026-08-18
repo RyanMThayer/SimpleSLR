@@ -70,6 +70,24 @@ export function findDois(text: string): string[] {
 /** Chars of normalized page 1 text considered "the top" (title zone). */
 const HEAD_LIMIT = 600;
 
+/**
+ * Position of a title in normalized page text, tolerant of PDF line
+ * breaks splitting words ("frame-work" extracting as "frame work"):
+ * falls back to comparing with all spaces stripped, rescaling the
+ * found index back to spaced coordinates.
+ */
+function titleIndexIn(normPage: string, t: string): number {
+  const direct = normPage.indexOf(t);
+  if (direct >= 0) return direct;
+  const strippedPage = normPage.replace(/ /g, "");
+  const strippedTitle = t.replace(/ /g, "");
+  if (strippedTitle.length < 12) return -1;
+  const j = strippedPage.indexOf(strippedTitle);
+  if (j < 0) return -1;
+  const ratio = normPage.length / Math.max(1, strippedPage.length);
+  return Math.round(j * ratio);
+}
+
 export function matchRecord(
   text: PdfText,
   candidates: RecordRow[]
@@ -78,7 +96,11 @@ export function matchRecord(
   const titleOf = (r: RecordRow) => r.norm_title ?? normalizeTitle(r.title);
   const doiOf = (r: RecordRow) => r.norm_doi ?? normalizeDoi(r.doi);
 
-  // 1. DOIs printed on page 1 (page 2+ DOIs are likely citations).
+  // 1. DOIs printed anywhere on page 1 (footers included; page 2+ DOIs
+  // are likely citations). A DOI match is corroborated by the record's
+  // title also appearing on page 1, which a paper's own first page
+  // always contains; a DOI without its title could be a footnote
+  // citation, so it is flagged for verification instead.
   const page1Dois = new Set(findDois(text.page1));
   if (page1Dois.size > 0) {
     const doiHits = candidates.filter((r) => {
@@ -86,13 +108,21 @@ export function matchRecord(
       return d !== null && page1Dois.has(d);
     });
     if (doiHits.length === 1) {
-      return { record: doiHits[0], label: "DOI exact", note: "" };
+      const hit = doiHits[0];
+      const hasTitle = titleIndexIn(norm1, titleOf(hit)) >= 0;
+      return hasTitle
+        ? { record: hit, label: "DOI exact", note: "" }
+        : {
+            record: hit,
+            label: "DOI (verify)",
+            note: "The DOI matches but the record's title was not found on page 1; this could be a footnote citation. Confirm before uploading.",
+          };
     }
     if (doiHits.length > 1) {
       // Several candidate DOIs on page 1 (citations in footnotes):
       // prefer the one whose title appears earliest on page 1.
       const ranked = doiHits
-        .map((r) => ({ r, idx: norm1.indexOf(titleOf(r)) }))
+        .map((r) => ({ r, idx: titleIndexIn(norm1, titleOf(r)) }))
         .filter((x) => x.idx >= 0)
         .sort((a, b) => a.idx - b.idx);
       if (ranked.length > 0) {
@@ -110,12 +140,12 @@ export function matchRecord(
     }
   }
 
-  // 2. Titles on page 1, ranked by position.
+  // 2. Titles on page 1, ranked by position (line break tolerant).
   const titleHits = candidates
     .map((r) => {
       const t = titleOf(r);
       if (!t || t.length < 15) return null;
-      const idx = norm1.indexOf(t);
+      const idx = titleIndexIn(norm1, t);
       return idx >= 0 ? { r, idx } : null;
     })
     .filter((x): x is { r: RecordRow; idx: number } => x !== null)
