@@ -90,22 +90,23 @@ export default function BulkPdfUpload({
       let status: RowStatus = "ready";
       try {
         const text = await extractFirstPagesText(row.file);
-        if (text.trim().length < 40) {
+        if ((text.page1 + text.rest).trim().length < 40) {
           note = "No text layer (scanned PDF?); assign manually.";
         } else {
           const m = matchRecord(text, cands);
-          if (m) {
+          note = m.note;
+          if (m.record) {
             if (claimed.has(m.record.id)) {
-              note = "Another file already matched this record; assign manually.";
+              note =
+                "Another file already matched this record; assign manually.";
             } else {
               selectedId = m.record.id;
               claimed.add(m.record.id);
-              matchLabel =
-                m.kind === "doi"
-                  ? "DOI exact"
-                  : `title ${(m.score * 100).toFixed(0)}%`;
+              matchLabel = m.label;
               if (m.record.fulltext_path) {
-                note = "Record already has a PDF; uploading replaces it.";
+                note = [note, "Record already has a PDF; uploading replaces it."]
+                  .filter(Boolean)
+                  .join(" ");
               }
             }
           }

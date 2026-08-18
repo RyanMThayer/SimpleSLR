@@ -127,6 +127,7 @@ export default function ScreenClient({
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showAbstract, setShowAbstract] = useState(false);
+  const [pdfExpanded, setPdfExpanded] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -745,6 +746,26 @@ export default function ScreenClient({
                           </button>
                         </>
                       )}
+                      {pdfUrl && (
+                        <>
+                          {" · "}
+                          <button
+                            onClick={() =>
+                              window.open(pdfUrl, "_blank", "noopener")
+                            }
+                            className="underline underline-offset-2"
+                          >
+                            Open in tab
+                          </button>
+                          {" · "}
+                          <button
+                            onClick={() => setPdfExpanded(!pdfExpanded)}
+                            className="underline underline-offset-2"
+                          >
+                            {pdfExpanded ? "Exit wide view" : "Wide view"}
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </p>
@@ -765,9 +786,9 @@ export default function ScreenClient({
                 {stage === "full_text" &&
                   (pdfUrl ? (
                     <iframe
-                      src={pdfUrl}
+                      src={`${pdfUrl}#view=FitH`}
                       title="Full text PDF"
-                      className="mt-3 min-h-[55vh] w-full flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700"
+                      className="mt-3 h-[78vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"
                     />
                   ) : current.fulltext_path ? (
                     <p className="mt-3 text-sm text-zinc-400">Loading PDF...</p>
@@ -828,7 +849,11 @@ export default function ScreenClient({
         </div>
 
         {/* ---------------- Sidebar ---------------- */}
-        <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-80">
+        <aside
+          className={`flex w-full shrink-0 flex-col gap-4 lg:w-80 ${
+            stage === "full_text" && pdfExpanded && pdfUrl ? "hidden" : ""
+          }`}
+        >
           <div className={sideCard}>
             <button
               onClick={() => setCriteriaOpen(!criteriaOpen)}

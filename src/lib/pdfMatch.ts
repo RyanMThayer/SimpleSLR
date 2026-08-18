@@ -2,24 +2,28 @@ import { normalizeDoi, normalizeTitle } from "./normalize";
 import type { RecordRow } from "./types";
 
 /**
- * Match an uploaded PDF to a record. Strategy, in order of confidence:
- * 1. A DOI printed in the PDF's first pages that exactly matches a
- *    record's DOI (near certain).
- * 2. The record's normalized title appearing in the extracted text, or
- *    a high token overlap with it (strong).
- * Anything below the threshold is left for manual assignment.
+ * Match an uploaded PDF to a record, position aware: a paper's own
+ * title sits at the top of page 1 and its own DOI is printed on page 1,
+ * while titles and DOIs of CITED papers appear later (related work,
+ * footnotes, references). So only page 1 evidence identifies the paper,
+ * and evidence near the top of page 1 beats evidence lower down.
  */
 
-export type PdfMatchResult =
-  | { kind: "doi"; record: RecordRow }
-  | { kind: "title"; record: RecordRow; score: number }
-  | null;
+export type MatchOutcome = {
+  record: RecordRow | null;
+  /** Short label for the review list ("DOI exact", "title, top of page 1", ...) */
+  label: string;
+  /** Extra context, e.g. citation lookalikes that were deliberately not matched. */
+  note: string;
+};
+
+export type PdfText = { page1: string; rest: string };
 
 /** Extract text from the first pages of a PDF, in the browser. */
 export async function extractFirstPagesText(
   file: File,
   maxPages = 2
-): Promise<string> {
+): Promise<PdfText> {
   const pdfjs = await import("pdfjs-dist");
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {
     pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -31,17 +35,20 @@ export async function extractFirstPagesText(
   const loadingTask = pdfjs.getDocument({ data: buf });
   try {
     const doc = await loadingTask.promise;
-    let text = "";
-    const n = Math.min(maxPages, doc.numPages);
-    for (let p = 1; p <= n; p++) {
+    const pageText = async (p: number) => {
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
-      text +=
-        content.items
-          .map((it) => ("str" in it ? (it as { str: string }).str : ""))
-          .join(" ") + " ";
+      return content.items
+        .map((it) => ("str" in it ? (it as { str: string }).str : ""))
+        .join(" ");
+    };
+    const page1 = doc.numPages >= 1 ? await pageText(1) : "";
+    let rest = "";
+    const n = Math.min(maxPages, doc.numPages);
+    for (let p = 2; p <= n; p++) {
+      rest += (await pageText(p)) + " ";
     }
-    return text;
+    return { page1, rest };
   } finally {
     await loadingTask.destroy();
   }
@@ -60,40 +67,127 @@ export function findDois(text: string): string[] {
   return [...out];
 }
 
-/** Match extracted PDF text against candidate records. */
+/** Chars of normalized page 1 text considered "the top" (title zone). */
+const HEAD_LIMIT = 600;
+
 export function matchRecord(
-  text: string,
+  text: PdfText,
   candidates: RecordRow[]
-): PdfMatchResult {
-  const dois = new Set(findDois(text));
-  if (dois.size > 0) {
-    const hit = candidates.find((r) => {
-      const d = r.norm_doi ?? normalizeDoi(r.doi);
-      return d !== null && dois.has(d);
+): MatchOutcome {
+  const norm1 = normalizeTitle(text.page1);
+  const titleOf = (r: RecordRow) => r.norm_title ?? normalizeTitle(r.title);
+  const doiOf = (r: RecordRow) => r.norm_doi ?? normalizeDoi(r.doi);
+
+  // 1. DOIs printed on page 1 (page 2+ DOIs are likely citations).
+  const page1Dois = new Set(findDois(text.page1));
+  if (page1Dois.size > 0) {
+    const doiHits = candidates.filter((r) => {
+      const d = doiOf(r);
+      return d !== null && page1Dois.has(d);
     });
-    if (hit) return { kind: "doi", record: hit };
+    if (doiHits.length === 1) {
+      return { record: doiHits[0], label: "DOI exact", note: "" };
+    }
+    if (doiHits.length > 1) {
+      // Several candidate DOIs on page 1 (citations in footnotes):
+      // prefer the one whose title appears earliest on page 1.
+      const ranked = doiHits
+        .map((r) => ({ r, idx: norm1.indexOf(titleOf(r)) }))
+        .filter((x) => x.idx >= 0)
+        .sort((a, b) => a.idx - b.idx);
+      if (ranked.length > 0) {
+        return {
+          record: ranked[0].r,
+          label: "DOI + title",
+          note: "Several known DOIs appear on page 1; picked the one whose title is highest.",
+        };
+      }
+      return {
+        record: null,
+        label: "no match",
+        note: "Several known DOIs appear on page 1; assign manually.",
+      };
+    }
   }
 
-  const normText = normalizeTitle(text);
-  let best: { record: RecordRow; score: number } | null = null;
+  // 2. Titles on page 1, ranked by position.
+  const titleHits = candidates
+    .map((r) => {
+      const t = titleOf(r);
+      if (!t || t.length < 15) return null;
+      const idx = norm1.indexOf(t);
+      return idx >= 0 ? { r, idx } : null;
+    })
+    .filter((x): x is { r: RecordRow; idx: number } => x !== null)
+    .sort((a, b) => a.idx - b.idx);
+
+  const headHits = titleHits.filter((x) => x.idx < HEAD_LIMIT);
+  if (headHits.length > 0) {
+    const lower = titleHits.filter((x) => x.idx >= HEAD_LIMIT);
+    return {
+      record: headHits[0].r,
+      label: "title, top of page 1",
+      note:
+        lower.length > 0
+          ? `Also found lower on the page (likely citations): ${lower
+              .map((x) => x.r.title.slice(0, 50))
+              .join("; ")}`
+          : "",
+    };
+  }
+  if (titleHits.length === 1) {
+    // One known title on page 1, but not at the top: could be the paper
+    // (unusual layout) or a citation. Suggest it, flag for a look.
+    return {
+      record: titleHits[0].r,
+      label: "title on page 1 (verify)",
+      note: "The title was found below the usual title position; confirm before uploading.",
+    };
+  }
+  if (titleHits.length > 1) {
+    return {
+      record: null,
+      label: "no match",
+      note: `Several known titles appear on page 1 but none at the top (likely citations): ${titleHits
+        .map((x) => x.r.title.slice(0, 50))
+        .join("; ")}. Assign manually.`,
+    };
+  }
+
+  // 3. Fuzzy fallback: token overlap against the page 1 head zone only.
+  const head = norm1.slice(0, HEAD_LIMIT);
+  let best: { r: RecordRow; score: number } | null = null;
   for (const r of candidates) {
-    const t = r.norm_title ?? normalizeTitle(r.title);
-    // Very short titles are unsafe to match on.
+    const t = titleOf(r);
     if (!t || t.length < 15) continue;
-    let score = 0;
-    if (normText.includes(t)) {
-      score = 1;
-    } else {
-      const tokens = t.split(" ").filter((w) => w.length > 3);
-      if (tokens.length >= 4) {
-        const hits = tokens.filter((w) => normText.includes(w)).length;
-        score = hits / tokens.length;
-      }
-    }
-    if (score > (best?.score ?? 0)) best = { record: r, score };
+    const tokens = t.split(" ").filter((w) => w.length > 3);
+    if (tokens.length < 4) continue;
+    const hits = tokens.filter((w) => head.includes(w)).length;
+    const score = hits / tokens.length;
+    if (score > (best?.score ?? 0)) best = { r, score };
   }
-  if (best && best.score >= 0.8) {
-    return { kind: "title", record: best.record, score: best.score };
+  if (best && best.score >= 0.85) {
+    return {
+      record: best.r,
+      label: `title ${(best.score * 100).toFixed(0)}%`,
+      note: "",
+    };
   }
-  return null;
+
+  // 4. Citation lookalikes beyond page 1, purely informational.
+  const normRest = normalizeTitle(text.rest);
+  const restHits = candidates.filter((r) => {
+    const t = titleOf(r);
+    return t.length >= 15 && normRest.includes(t);
+  });
+  return {
+    record: null,
+    label: "no match",
+    note:
+      restHits.length > 0
+        ? `Titles of known records appear beyond page 1 (likely citations): ${restHits
+            .map((r) => r.title.slice(0, 50))
+            .join("; ")}. Assign manually.`
+        : "",
+  };
 }
