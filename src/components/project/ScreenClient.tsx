@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { outcomeOf } from "@/lib/outcomes";
+import { cleanQuote } from "@/lib/concepts";
 import {
   fulltextPathFor,
   signedFulltextUrl,
@@ -129,6 +130,9 @@ export default function ScreenClient({
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showAbstract, setShowAbstract] = useState(false);
+  // Pasting an abstract for records that came without one
+  const [pasteAbs, setPasteAbs] = useState("");
+  const [pasteBusy, setPasteBusy] = useState(false);
   const [pdfExpanded, setPdfExpanded] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -301,8 +305,9 @@ export default function ScreenClient({
     // Reset viewer state when the record or stage changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPdfUrl(null);
-     
+
     setShowAbstract(false);
+    setPasteAbs("");
     if (stage === "full_text" && current?.fulltext_path) {
       signedFulltextUrl(current.fulltext_path).then((res) => {
         if (cancelled) return;
@@ -423,6 +428,28 @@ export default function ScreenClient({
     setMineDone((d) => Math.max(0, d - 1));
     setCanUndo(undoStack.current.length > 0);
   }, [userId, queue, stage]);
+
+  async function saveAbstract() {
+    if (!current || !pasteAbs.trim() || pasteBusy) return;
+    setPasteBusy(true);
+    const supabase = createClient();
+    const text = cleanQuote(pasteAbs);
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({ abstract: text })
+      .eq("id", current.id);
+    setPasteBusy(false);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setQueue((q) =>
+      q
+        ? q.map((r) => (r.id === current.id ? { ...r, abstract: text } : r))
+        : q
+    );
+    setPasteAbs("");
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -787,9 +814,29 @@ export default function ScreenClient({
                       />
                     </p>
                   ) : (
-                    <p className="italic text-zinc-400 dark:text-zinc-500">
-                      No abstract in the export for this record.
-                    </p>
+                    <div>
+                      <p className="italic text-zinc-400 dark:text-zinc-500">
+                        No abstract in the export for this record.
+                      </p>
+                      <div className="mt-2 flex max-w-2xl flex-col gap-2">
+                        <textarea
+                          value={pasteAbs}
+                          onChange={(e) => setPasteAbs(e.target.value)}
+                          placeholder="Found it elsewhere? Paste the abstract here and it stays with the record."
+                          rows={3}
+                          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                        />
+                        {pasteAbs.trim() && (
+                          <button
+                            onClick={saveAbstract}
+                            disabled={pasteBusy}
+                            className="self-start rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          >
+                            {pasteBusy ? "Saving..." : "Save abstract"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 {stage === "full_text" &&
                   (pdfUrl ? (

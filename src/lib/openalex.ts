@@ -24,7 +24,7 @@ export type OaWork = {
 const SELECT =
   "id,doi,display_name,publication_year,cited_by_count,referenced_works,authorships,primary_location,abstract_inverted_index";
 
-async function oa<T>(path: string): Promise<T> {
+export async function oa<T>(path: string): Promise<T> {
   const res = await fetch(`/api/openalex?u=${encodeURIComponent(path)}`);
   const body = await res.json();
   if (!res.ok) {

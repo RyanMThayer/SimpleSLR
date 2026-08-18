@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import { outcomeOf } from "@/lib/outcomes";
+import { findMissingAbstracts } from "@/lib/abstracts";
 import {
   removeFulltext,
   removeFulltextPaths,
@@ -76,6 +77,8 @@ export default function RecordsClient({
     Map<string, { seedId: string; direction: string }[]>
   >(new Map());
   const [seedTitles, setSeedTitles] = useState<Map<string, string>>(new Map());
+  const [absBusy, setAbsBusy] = useState(false);
+  const [absMsg, setAbsMsg] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -345,6 +348,69 @@ export default function RecordsClient({
     setEditingId(null);
     setForm(null);
     load();
+  }
+
+  async function fetchMissingAbstracts() {
+    if (absBusy) return;
+    setAbsBusy(true);
+    setAbsMsg("Collecting records without abstracts...");
+    const supabase = createClient();
+    try {
+      const all: RecordRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error: qErr } = await supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", projectId)
+          .eq("status", "active")
+          .range(from, from + 999);
+        if (qErr) throw new Error(qErr.message);
+        all.push(...((data ?? []) as RecordRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      const missingBefore = all.filter((r) => !r.abstract?.trim()).length;
+      if (missingBefore === 0) {
+        setAbsMsg("Every active record already has an abstract.");
+        setAbsBusy(false);
+        return;
+      }
+      const { updates, notes } = await findMissingAbstracts(all, setAbsMsg);
+      setAbsMsg(`Saving ${updates.length} abstracts...`);
+      for (let i = 0; i < updates.length; i += 20) {
+        await Promise.all(
+          updates
+            .slice(i, i + 20)
+            .map((u) =>
+              supabase
+                .from("records")
+                .update({ abstract: u.abstract })
+                .eq("id", u.recordId)
+            )
+        );
+      }
+      const bySource = new Map<string, number>();
+      updates.forEach((u) =>
+        bySource.set(u.source, (bySource.get(u.source) ?? 0) + 1)
+      );
+      const parts = [...bySource.entries()]
+        .map(([s, n]) => `${s} ${n}`)
+        .join(", ");
+      const still = missingBefore - updates.length;
+      setAbsMsg(
+        `Found ${updates.length} of ${missingBefore} missing abstracts${
+          parts ? ` (${parts})` : ""
+        }.${
+          still > 0
+            ? ` ${still} still missing; paste those in from the screening room or via Edit here.`
+            : ""
+        }${notes.length ? ` ${notes.join(" ")}` : ""}`
+      );
+      load();
+    } catch (e) {
+      setAbsMsg(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setAbsBusy(false);
   }
 
   async function deleteRecord(r: RecordRow) {
@@ -671,6 +737,20 @@ export default function RecordsClient({
           <option value="exclude">Excluded</option>
           <option value="undecided">Undecided</option>
         </select>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <button
+          onClick={fetchMissingAbstracts}
+          disabled={absBusy}
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          {absBusy ? "Searching..." : "Find missing abstracts"}
+        </button>
+        <p className="min-w-0 flex-1 text-xs text-zinc-500 dark:text-zinc-400">
+          {absMsg ??
+            "Looks up every active record without an abstract in OpenAlex, Semantic Scholar, and Crossref (free scholarly indexes). Whatever stays missing can be pasted by hand in the screening room or via Edit."}
+        </p>
       </div>
 
       {sources !== null && sources.length > 0 && (
