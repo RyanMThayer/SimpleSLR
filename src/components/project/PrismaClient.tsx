@@ -23,10 +23,28 @@ type Data = {
   profiles: Map<string, Profile>;
 };
 
+/** One PRISMA 2020 arm: via databases, or via other methods (snowballing). */
+type ArmCounts = {
+  identified: number;
+  backward: number;
+  forward: number;
+  duplicates: number;
+  screened: number;
+  taExcluded: number;
+  sought: number;
+  notRetrieved: number;
+  assessed: number;
+  ftExcluded: number;
+  ftExcludedByReason: { label: string; count: number }[];
+  ftIncluded: number;
+};
+
 type Counts = {
   identified: number;
   viaSnowball: number;
-  perSource: { name: string; imported: number; rawHits: number | null }[];
+  db: ArmCounts;
+  other: ArmCounts;
+  perSource: { name: string; imported: number; rawHits: number | null; snowball: boolean }[];
   duplicates: number;
   screened: number;
   taExcluded: number;
@@ -61,17 +79,61 @@ function computeCounts(d: Data): Counts {
   const active = d.records.filter((r) => r.status === "active");
   const duplicates = d.records.length - active.length;
 
+  // Batches created before the snowball migration have no origin column;
+  // treat those as ordinary database imports.
+  const snowballBatchIds = new Set(
+    d.batches.filter((b) => b.origin?.startsWith("snowball")).map((b) => b.id)
+  );
+  const backwardBatchIds = new Set(
+    d.batches.filter((b) => b.origin === "snowball_backward").map((b) => b.id)
+  );
+  const isSnow = (r: RecordRow) =>
+    Boolean(r.batch_id && snowballBatchIds.has(r.batch_id));
+
+  const mkArm = (): ArmCounts => ({
+    identified: 0,
+    backward: 0,
+    forward: 0,
+    duplicates: 0,
+    screened: 0,
+    taExcluded: 0,
+    sought: 0,
+    notRetrieved: 0,
+    assessed: 0,
+    ftExcluded: 0,
+    ftExcludedByReason: [],
+    ftIncluded: 0,
+  });
+  const db = mkArm();
+  const other = mkArm();
+  const dbReasonCounts = new Map<string, number>();
+  const otherReasonCounts = new Map<string, number>();
+
   const taMap = decisionsByRecord(d.decisions, "title_abstract");
   let taExcluded = 0,
     taIncluded = 0,
     taConflicts = 0,
     taUndecided = 0;
   const taRecordIds = new Set<string>();
-  for (const r of active) {
+  for (const r of d.records) {
+    const arm = isSnow(r) ? other : db;
+    arm.identified++;
+    if (arm === other) {
+      if (r.batch_id && backwardBatchIds.has(r.batch_id)) arm.backward++;
+      else arm.forward++;
+    }
+    if (r.status !== "active") {
+      arm.duplicates++;
+      continue;
+    }
+    arm.screened++;
     const o = outcomeOf(taMap.get(r.id) ?? []);
-    if (o === "excluded") taExcluded++;
-    else if (o === "included") {
+    if (o === "excluded") {
+      taExcluded++;
+      arm.taExcluded++;
+    } else if (o === "included") {
       taIncluded++;
+      arm.sought++;
       taRecordIds.add(r.id);
     } else if (o === "conflict") taConflicts++;
     else taUndecided++;
@@ -79,7 +141,6 @@ function computeCounts(d: Data): Counts {
 
   const ftMap = decisionsByRecord(d.decisions, "full_text");
   const reasonLabel = new Map(d.reasons.map((r) => [r.id, r.label]));
-  const ftReasonCounts = new Map<string, number>();
   const recById = new Map(d.records.map((r) => [r.id, r]));
   let ftExcluded = 0,
     ftIncluded = 0,
@@ -87,39 +148,48 @@ function computeCounts(d: Data): Counts {
     notRetrieved = 0;
   const ftRecordIds = new Set<string>();
   for (const id of taRecordIds) {
-    if (recById.get(id)?.retrieval_status === "not_retrieved") {
+    const rec = recById.get(id);
+    const arm = rec && isSnow(rec) ? other : db;
+    const reasonCounts = arm === other ? otherReasonCounts : dbReasonCounts;
+    if (rec?.retrieval_status === "not_retrieved") {
       notRetrieved++;
+      arm.notRetrieved++;
       continue;
     }
     const decs = ftMap.get(id) ?? [];
     const o = outcomeOf(decs);
     if (o === "excluded") {
       ftExcluded++;
+      arm.ftExcluded++;
       const withReason = decs.find(
         (x) => x.decision === "exclude" && x.reason_id
       );
       const label = withReason?.reason_id
         ? (reasonLabel.get(withReason.reason_id) ?? "Removed reason")
         : "No reason recorded";
-      ftReasonCounts.set(label, (ftReasonCounts.get(label) ?? 0) + 1);
+      reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
     } else if (o === "included") {
       ftIncluded++;
+      arm.ftIncluded++;
       ftRecordIds.add(id);
     } else {
       ftUndecided++;
     }
   }
+  db.assessed = db.sought - db.notRetrieved;
+  other.assessed = other.sought - other.notRetrieved;
+  const toSorted = (m: Map<string, number>) =>
+    [...m.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+  db.ftExcludedByReason = toSorted(dbReasonCounts);
+  other.ftExcludedByReason = toSorted(otherReasonCounts);
 
   const dbById = new Map(d.databases.map((x) => [x.id, x]));
-  // Batches created before the snowball migration have no origin column;
-  // treat those as ordinary database imports.
-  const snowballBatchIds = new Set(
-    d.batches.filter((b) => b.origin?.startsWith("snowball")).map((b) => b.id)
-  );
-  const viaSnowball = d.records.filter(
-    (r) => r.batch_id && snowballBatchIds.has(r.batch_id)
-  ).length;
-  const perSourceMap = new Map<string, { imported: number; rawHits: number | null }>();
+  const perSourceMap = new Map<
+    string,
+    { imported: number; rawHits: number | null; snowball: boolean }
+  >();
   for (const b of d.batches) {
     const name = b.database_id
       ? (dbById.get(b.database_id)?.name ?? "Removed database")
@@ -127,14 +197,22 @@ function computeCounts(d: Data): Counts {
     const entry = perSourceMap.get(name) ?? {
       imported: 0,
       rawHits: b.database_id ? (dbById.get(b.database_id)?.raw_hit_count ?? null) : null,
+      snowball: Boolean(b.origin?.startsWith("snowball")),
     };
     entry.imported += b.record_count;
     perSourceMap.set(name, entry);
   }
 
+  const merged = new Map<string, number>();
+  [...dbReasonCounts, ...otherReasonCounts].forEach(([l, n]) =>
+    merged.set(l, (merged.get(l) ?? 0) + n)
+  );
+
   return {
     identified: d.records.length,
-    viaSnowball,
+    viaSnowball: other.identified,
+    db,
+    other,
     perSource: [...perSourceMap.entries()].map(([name, v]) => ({ name, ...v })),
     duplicates,
     screened: active.length,
@@ -144,9 +222,7 @@ function computeCounts(d: Data): Counts {
     taUndecided,
     notRetrieved,
     assessed: taIncluded - notRetrieved,
-    ftExcludedByReason: [...ftReasonCounts.entries()]
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count),
+    ftExcludedByReason: toSorted(merged),
     ftExcluded,
     ftIncluded,
     ftUndecided,
@@ -159,72 +235,82 @@ function computeCounts(d: Data): Counts {
 // SVG diagram
 // ----------------------------------------------------------------------
 
-type Box = { x: number; y: number; w: number; h: number; lines: string[] };
+type Box = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+  /** Render as a column header: shaded, centered, no border. */
+  header?: boolean;
+};
 
-function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: number; height: number } {
-  const LINE = 16;
-  const PAD = 10;
+type Diagram = { boxes: Box[]; arrows: string[]; width: number; height: number };
+
+const LINE = 16;
+const PAD = 10;
+const GAP = 26;
+
+function mkBox(x: number, w: number, lines: string[]): Omit<Box, "y"> {
+  return { x, w, h: lines.length * LINE + PAD * 2, lines };
+}
+
+function reasonLines(arm: ArmCounts): string[] {
+  const lines = arm.ftExcludedByReason
+    .slice(0, 8)
+    .map((r) => `${r.label} (n = ${r.count})`);
+  return lines.length ? lines : ["(no full text exclusions yet)"];
+}
+
+function sourceLines(c: Counts): string[] {
+  const dbSources = c.perSource.filter((s) => !s.snowball);
+  const lines = dbSources.slice(0, 6).map((s) => `${s.name} (n = ${s.imported})`);
+  if (dbSources.length > 6) lines.push("and more sources");
+  return lines;
+}
+
+function layoutDiagram(c: Counts): Diagram {
+  return c.other.identified > 0 ? layoutTwoArms(c) : layoutSingleArm(c);
+}
+
+/** Classic single column layout, used while no snowballing has happened. */
+function layoutSingleArm(c: Counts): Diagram {
   const MAIN_X = 30;
   const MAIN_W = 330;
   const SIDE_X = 410;
   const SIDE_W = 300;
-  const GAP = 26;
 
-  const sourceLines = c.perSource
-    .slice(0, 6)
-    .map((s) => `${s.name} (n = ${s.imported})`);
-  if (c.perSource.length > 6) sourceLines.push("and more sources");
-
-  const reasonLines = c.ftExcludedByReason
-    .slice(0, 8)
-    .map((r) => `${r.label} (n = ${r.count})`);
-
-  const mk = (x: number, w: number, lines: string[]): Omit<Box, "y"> => ({
-    x,
-    w,
-    h: lines.length * LINE + PAD * 2,
-    lines,
-  });
-
-  const identify = mk(MAIN_X, MAIN_W, [
-    c.viaSnowball > 0
-      ? "Records identified"
-      : "Records identified from databases",
+  const identify = mkBox(MAIN_X, MAIN_W, [
+    "Records identified from databases",
     `(n = ${c.identified})`,
-    ...(c.viaSnowball > 0
-      ? [
-          `From database searches (n = ${c.identified - c.viaSnowball})`,
-          `Via snowballing (n = ${c.viaSnowball})`,
-        ]
-      : []),
-    ...sourceLines,
+    ...sourceLines(c),
   ]);
-  const dupBox = mk(SIDE_X, SIDE_W, [
+  const dupBox = mkBox(SIDE_X, SIDE_W, [
     "Duplicate records removed",
     `(n = ${c.duplicates})`,
   ]);
-  const screened = mk(MAIN_X, MAIN_W, [`Records screened (n = ${c.screened})`]);
-  const taExc = mk(SIDE_X, SIDE_W, [
+  const screened = mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.screened})`]);
+  const taExc = mkBox(SIDE_X, SIDE_W, [
     "Records excluded at title/abstract",
     `(n = ${c.taExcluded})`,
   ]);
-  const sought = mk(MAIN_X, MAIN_W, [
+  const sought = mkBox(MAIN_X, MAIN_W, [
     "Reports sought for retrieval",
     `(n = ${c.taIncluded})`,
   ]);
-  const notRet = mk(SIDE_X, SIDE_W, [
+  const notRet = mkBox(SIDE_X, SIDE_W, [
     "Reports not retrieved",
     `(n = ${c.notRetrieved})`,
   ]);
-  const assessed = mk(MAIN_X, MAIN_W, [
+  const assessed = mkBox(MAIN_X, MAIN_W, [
     "Reports assessed for eligibility",
     `(n = ${c.assessed})`,
   ]);
-  const ftExc = mk(SIDE_X, SIDE_W, [
+  const ftExc = mkBox(SIDE_X, SIDE_W, [
     `Reports excluded (n = ${c.ftExcluded}):`,
-    ...(reasonLines.length ? reasonLines : ["(no full text exclusions yet)"]),
+    ...reasonLines(c.db),
   ]);
-  const included = mk(MAIN_X, MAIN_W, [
+  const included = mkBox(MAIN_X, MAIN_W, [
     "Studies included in review",
     `(n = ${c.ftIncluded})`,
   ]);
@@ -276,6 +362,192 @@ function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: numb
   };
 }
 
+/**
+ * PRISMA 2020 two column layout: identification via databases on the
+ * left, via other methods (snowballing) on the right, meeting in the
+ * shared "Studies included" box at the bottom. The right arm carries a
+ * "Records screened" box, an addition the guideline permits, because
+ * SimpleSLR formally screens snowball records at title/abstract.
+ */
+function layoutTwoArms(c: Counts): Diagram {
+  const MAIN_X = 20;
+  const MAIN_W = 300;
+  const S1_X = 336;
+  const S1_W = 240;
+  const OTH_X = 612;
+  const OTH_W = 300;
+  const S2_X = 928;
+  const S2_W = 240;
+  const width = S2_X + S2_W + 20;
+
+  const dirLines: string[] = [];
+  if (c.other.backward > 0) dirLines.push(`Backward (n = ${c.other.backward})`);
+  if (c.other.forward > 0) dirLines.push(`Forward (n = ${c.other.forward})`);
+
+  const rows: {
+    main: Omit<Box, "y">;
+    oth: Omit<Box, "y">;
+    side1: Omit<Box, "y"> | null;
+    side2: Omit<Box, "y"> | null;
+  }[] = [
+    {
+      main: mkBox(MAIN_X, MAIN_W, [
+        "Records identified from databases",
+        `(n = ${c.db.identified})`,
+        ...sourceLines(c),
+      ]),
+      oth: mkBox(OTH_X, OTH_W, [
+        "Records identified via snowballing",
+        `(n = ${c.other.identified})`,
+        ...dirLines,
+      ]),
+      side1: mkBox(S1_X, S1_W, [
+        "Duplicate records removed",
+        `(n = ${c.db.duplicates})`,
+      ]),
+      side2:
+        c.other.duplicates > 0
+          ? mkBox(S2_X, S2_W, [
+              "Duplicate records removed",
+              `(n = ${c.other.duplicates})`,
+            ])
+          : null,
+    },
+    {
+      main: mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.db.screened})`]),
+      oth: mkBox(OTH_X, OTH_W, [`Records screened (n = ${c.other.screened})`]),
+      side1: mkBox(S1_X, S1_W, [
+        "Records excluded at title/abstract",
+        `(n = ${c.db.taExcluded})`,
+      ]),
+      side2: mkBox(S2_X, S2_W, [
+        "Records excluded at title/abstract",
+        `(n = ${c.other.taExcluded})`,
+      ]),
+    },
+    {
+      main: mkBox(MAIN_X, MAIN_W, [
+        "Reports sought for retrieval",
+        `(n = ${c.db.sought})`,
+      ]),
+      oth: mkBox(OTH_X, OTH_W, [
+        "Reports sought for retrieval",
+        `(n = ${c.other.sought})`,
+      ]),
+      side1: mkBox(S1_X, S1_W, [
+        "Reports not retrieved",
+        `(n = ${c.db.notRetrieved})`,
+      ]),
+      side2: mkBox(S2_X, S2_W, [
+        "Reports not retrieved",
+        `(n = ${c.other.notRetrieved})`,
+      ]),
+    },
+    {
+      main: mkBox(MAIN_X, MAIN_W, [
+        "Reports assessed for eligibility",
+        `(n = ${c.db.assessed})`,
+      ]),
+      oth: mkBox(OTH_X, OTH_W, [
+        "Reports assessed for eligibility",
+        `(n = ${c.other.assessed})`,
+      ]),
+      side1: mkBox(S1_X, S1_W, [
+        `Reports excluded (n = ${c.db.ftExcluded}):`,
+        ...reasonLines(c.db),
+      ]),
+      side2: mkBox(S2_X, S2_W, [
+        `Reports excluded (n = ${c.other.ftExcluded}):`,
+        ...reasonLines(c.other),
+      ]),
+    },
+  ];
+
+  const boxes: Box[] = [];
+  const arrows: string[] = [];
+  const HEAD_H = 30;
+  let y = 16;
+  boxes.push({
+    x: MAIN_X,
+    y,
+    w: S1_X + S1_W - MAIN_X,
+    h: HEAD_H,
+    lines: ["Identification of studies via databases"],
+    header: true,
+  });
+  boxes.push({
+    x: OTH_X,
+    y,
+    w: S2_X + S2_W - OTH_X,
+    h: HEAD_H,
+    lines: ["Identification of studies via snowballing"],
+    header: true,
+  });
+  y += HEAD_H + 18;
+
+  const mainMid = MAIN_X + MAIN_W / 2;
+  const othMid = OTH_X + OTH_W / 2;
+  const placed: { main: Box; oth: Box }[] = [];
+  for (const row of rows) {
+    const rowH = Math.max(
+      row.main.h,
+      row.oth.h,
+      row.side1?.h ?? 0,
+      row.side2?.h ?? 0
+    );
+    const center = (b: Omit<Box, "y">): Box => ({
+      ...b,
+      y: y + (rowH - b.h) / 2,
+    });
+    const mainB = center(row.main);
+    const othB = center(row.oth);
+    boxes.push(mainB, othB);
+    if (row.side1) {
+      const s = center(row.side1);
+      boxes.push(s);
+      arrows.push(
+        `M ${MAIN_X + MAIN_W} ${s.y + s.h / 2} L ${S1_X} ${s.y + s.h / 2}`
+      );
+    }
+    if (row.side2) {
+      const s = center(row.side2);
+      boxes.push(s);
+      arrows.push(
+        `M ${OTH_X + OTH_W} ${s.y + s.h / 2} L ${S2_X} ${s.y + s.h / 2}`
+      );
+    }
+    placed.push({ main: mainB, oth: othB });
+    y += rowH + GAP;
+  }
+  for (let i = 0; i < placed.length - 1; i++) {
+    arrows.push(
+      `M ${mainMid} ${placed[i].main.y + placed[i].main.h} L ${mainMid} ${placed[i + 1].main.y}`
+    );
+    arrows.push(
+      `M ${othMid} ${placed[i].oth.y + placed[i].oth.h} L ${othMid} ${placed[i + 1].oth.y}`
+    );
+  }
+
+  const included = mkBox(MAIN_X, MAIN_W, [
+    "Studies included in review",
+    `(n = ${c.db.ftIncluded + c.other.ftIncluded})`,
+    `Via databases (n = ${c.db.ftIncluded})`,
+    `Via snowballing (n = ${c.other.ftIncluded})`,
+  ]);
+  const includedB: Box = { ...included, y };
+  boxes.push(includedB);
+  const last = placed[placed.length - 1];
+  arrows.push(
+    `M ${mainMid} ${last.main.y + last.main.h} L ${mainMid} ${includedB.y}`
+  );
+  const incMidY = includedB.y + includedB.h / 2;
+  arrows.push(
+    `M ${othMid} ${last.oth.y + last.oth.h} L ${othMid} ${incMidY} L ${MAIN_X + MAIN_W} ${incMidY}`
+  );
+
+  return { boxes, arrows, width, height: y + included.h + 20 };
+}
+
 function PrismaDiagram({
   counts,
   svgRef,
@@ -322,15 +594,21 @@ function PrismaDiagram({
             width={b.w}
             height={b.h}
             rx="6"
-            fill="#fafafa"
-            stroke="#3f3f46"
+            fill={b.header ? "#f4f4f5" : "#fafafa"}
+            stroke={b.header ? "none" : "#3f3f46"}
             strokeWidth="1.2"
           />
           {b.lines.map((line, li) => (
             <text
               key={li}
-              x={b.x + 10}
-              y={b.y + 10 + (li + 1) * 16 - 4}
+              x={b.header ? b.x + b.w / 2 : b.x + 10}
+              y={
+                b.header
+                  ? b.y + b.h / 2 + 4.5
+                  : b.y + 10 + (li + 1) * 16 - 4
+              }
+              textAnchor={b.header ? "middle" : "start"}
+              fontWeight={b.header ? 600 : 400}
               fontFamily="Helvetica, Arial, sans-serif"
               fontSize="12.5"
               fill="#18181b"
