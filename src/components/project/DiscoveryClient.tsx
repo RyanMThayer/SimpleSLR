@@ -9,6 +9,7 @@ import {
   repairDependents,
   repairSummary,
 } from "@/lib/rededupe";
+import { removeFulltextPaths } from "@/lib/fulltext";
 import {
   KIND_HINTS,
   STANDARD_DATABASES,
@@ -257,9 +258,12 @@ export default function DiscoveryClient({
     const supabase = createClient();
     const { data: idRows } = await supabase
       .from("records")
-      .select("id")
+      .select("id, fulltext_path")
       .eq("batch_id", batch.id);
     const deletedIds = (idRows ?? []).map((r) => r.id);
+    const pdfPaths = (idRows ?? [])
+      .map((r) => r.fulltext_path)
+      .filter((p): p is string => Boolean(p));
     const dependents = await collectDependents(project.id, deletedIds);
     const { error: recErr } = await supabase
       .from("records")
@@ -277,6 +281,7 @@ export default function DiscoveryClient({
       setError(delErr.message);
       return;
     }
+    await removeFulltextPaths(pdfPaths);
     try {
       const repair = await repairDependents(
         project.id,
@@ -299,12 +304,16 @@ export default function DiscoveryClient({
     if (!ok) return;
     const supabase = createClient();
     const deletedIds: string[] = [];
+    const pdfPaths: string[] = [];
     for (const b of dbBatches) {
       const { data: idRows } = await supabase
         .from("records")
-        .select("id")
+        .select("id, fulltext_path")
         .eq("batch_id", b.id);
-      (idRows ?? []).forEach((r) => deletedIds.push(r.id));
+      (idRows ?? []).forEach((r) => {
+        deletedIds.push(r.id);
+        if (r.fulltext_path) pdfPaths.push(r.fulltext_path);
+      });
     }
     const dependents = await collectDependents(project.id, deletedIds);
     for (const b of dbBatches) {
@@ -333,6 +342,7 @@ export default function DiscoveryClient({
       setError(dbErr.message);
       return;
     }
+    await removeFulltextPaths(pdfPaths);
     try {
       const repair = await repairDependents(
         project.id,

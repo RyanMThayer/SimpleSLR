@@ -5,6 +5,13 @@ import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import { outcomeOf } from "@/lib/outcomes";
 import {
+  removeFulltext,
+  removeFulltextPaths,
+  signedFulltextUrl,
+  uploadFulltext,
+} from "@/lib/fulltext";
+import { useRef } from "react";
+import {
   collectDependents,
   repairDependents,
   repairSummary,
@@ -67,6 +74,9 @@ export default function RecordsClient({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const uploadTarget = useRef<RecordRow | null>(null);
 
   const loadSources = useCallback(async () => {
     const supabase = createClient();
@@ -217,12 +227,16 @@ export default function RecordsClient({
     if (!ok) return;
     const supabase = createClient();
     const deletedIds: string[] = [];
+    const pdfPaths: string[] = [];
     for (let i = 0; i < src.batchIds.length; i += 100) {
       const { data: idRows } = await supabase
         .from("records")
-        .select("id")
+        .select("id, fulltext_path")
         .in("batch_id", src.batchIds.slice(i, i + 100));
-      (idRows ?? []).forEach((r) => deletedIds.push(r.id));
+      (idRows ?? []).forEach((r) => {
+        deletedIds.push(r.id);
+        if (r.fulltext_path) pdfPaths.push(r.fulltext_path);
+      });
     }
     const dependents = await collectDependents(projectId, deletedIds);
     const { error: recErr } = await supabase
@@ -241,6 +255,7 @@ export default function RecordsClient({
       setError(batchErr.message);
       return;
     }
+    await removeFulltextPaths(pdfPaths);
     try {
       await repairDependents(projectId, dependents, new Set(deletedIds));
     } catch (e) {
@@ -309,6 +324,7 @@ export default function RecordsClient({
       setError(delErr.message);
       return;
     }
+    if (r.fulltext_path) await removeFulltextPaths([r.fulltext_path]);
     try {
       const repair = await repairDependents(
         projectId,
@@ -360,6 +376,46 @@ export default function RecordsClient({
       .eq("decided_by", userId);
     if (delErr) {
       setError(delErr.message);
+      return;
+    }
+    load();
+  }
+
+  function pickPdf(r: RecordRow) {
+    uploadTarget.current = r;
+    fileRef.current?.click();
+  }
+
+  async function onPdfPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    const target = uploadTarget.current;
+    uploadTarget.current = null;
+    if (!file || !target) return;
+    setUploadBusy(true);
+    const err = await uploadFulltext(projectId, target.id, file);
+    setUploadBusy(false);
+    if (err) {
+      setError(err);
+      return;
+    }
+    load();
+  }
+
+  async function viewPdf(r: RecordRow) {
+    if (!r.fulltext_path) return;
+    const res = await signedFulltextUrl(r.fulltext_path);
+    if (res.url) window.open(res.url, "_blank", "noopener");
+    else if (res.error) setError(res.error);
+  }
+
+  async function removePdf(r: RecordRow) {
+    if (!r.fulltext_path) return;
+    const ok = window.confirm("Remove the stored PDF for this record?");
+    if (!ok) return;
+    const err = await removeFulltext(r.id, r.fulltext_path);
+    if (err) {
+      setError(err);
       return;
     }
     load();
@@ -483,6 +539,13 @@ export default function RecordsClient({
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        ref={fileRef}
+        className="hidden"
+        onChange={onPdfPicked}
+      />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="mr-auto text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
           Records <span className="text-base font-normal text-zinc-400">({total})</span>
@@ -634,6 +697,11 @@ export default function RecordsClient({
                       no access
                     </span>
                   )}
+                  {r.fulltext_path && (
+                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                      PDF
+                    </span>
+                  )}
                   {mine && (
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs ${badge(mine.decision)}`}
@@ -689,6 +757,42 @@ export default function RecordsClient({
                             </button>
                           </>
                         )}
+                        <div className="flex flex-wrap items-center gap-3 text-xs">
+                          <span className="font-medium text-zinc-500 dark:text-zinc-400">
+                            PDF:
+                          </span>
+                          {r.fulltext_path ? (
+                            <>
+                              <button
+                                onClick={() => viewPdf(r)}
+                                className="underline underline-offset-2 text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                              >
+                                View
+                              </button>
+                              <button
+                                onClick={() => pickPdf(r)}
+                                disabled={uploadBusy}
+                                className="underline underline-offset-2 text-zinc-600 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
+                              >
+                                Replace
+                              </button>
+                              <button
+                                onClick={() => removePdf(r)}
+                                className="underline underline-offset-2 text-zinc-400 hover:text-red-600"
+                              >
+                                Remove
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => pickPdf(r)}
+                              disabled={uploadBusy}
+                              className="underline underline-offset-2 text-zinc-600 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
+                            >
+                              {uploadBusy ? "Uploading..." : "Upload full text PDF"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="flex gap-4">

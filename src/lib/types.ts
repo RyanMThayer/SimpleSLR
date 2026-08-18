@@ -105,6 +105,7 @@ export type RecordRow = {
   assigned_to: string | null;
   ft_assigned_to: string | null;
   retrieval_status: "not_retrieved" | null;
+  fulltext_path: string | null;
   norm_title: string | null;
   norm_doi: string | null;
   created_at: string;

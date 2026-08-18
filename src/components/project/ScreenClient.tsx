@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { outcomeOf } from "@/lib/outcomes";
+import {
+  fulltextPathFor,
+  signedFulltextUrl,
+  uploadFulltext,
+} from "@/lib/fulltext";
 import type {
   Decision,
   ExclusionReason,
@@ -118,6 +123,12 @@ export default function ScreenClient({
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const undoStack = useRef<{ rec: RecordRow; at: number }[]>([]);
+
+  // Full text PDF viewing and upload
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [showAbstract, setShowAbstract] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // Criteria panel
   const [criteriaOpen, setCriteriaOpen] = useState(true);
@@ -275,6 +286,44 @@ export default function ScreenClient({
 
   const current =
     queue && queue.length > 0 ? queue[Math.min(idx, queue.length - 1)] : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    // Reset viewer state when the record or stage changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPdfUrl(null);
+     
+    setShowAbstract(false);
+    if (stage === "full_text" && current?.fulltext_path) {
+      signedFulltextUrl(current.fulltext_path).then((res) => {
+        if (cancelled) return;
+        if (res.url) setPdfUrl(res.url);
+        else if (res.error) setError(res.error);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id, current?.fulltext_path, stage]);
+
+  async function onPdfPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !current) return;
+    setUploadBusy(true);
+    const err = await uploadFulltext(project.id, current.id, file);
+    setUploadBusy(false);
+    if (err) {
+      setError(err);
+      return;
+    }
+    const path = fulltextPathFor(project.id, current.id);
+    const id = current.id;
+    setQueue(
+      (q) =>
+        q?.map((r) => (r.id === id ? { ...r, fulltext_path: path } : r)) ?? q
+    );
+  }
 
   const goNext = useCallback(() => {
     if (!queue || queue.length < 2) return;
@@ -536,6 +585,13 @@ export default function ScreenClient({
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        ref={fileRef}
+        className="hidden"
+        onChange={onPdfPicked}
+      />
       <div className="mb-4 flex gap-2">
         {(
           [
@@ -626,7 +682,7 @@ export default function ScreenClient({
             </div>
           ) : (
             <>
-              <article className="mb-4 flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+              <article className="mb-4 flex flex-1 flex-col overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
                 <h2 className="mb-2 text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
                   <Highlighted
                     text={current.title}
@@ -664,20 +720,65 @@ export default function ScreenClient({
                       </a>
                     </>
                   )}
+                  {stage === "full_text" && (
+                    <>
+                      {" · "}
+                      <button
+                        onClick={() => fileRef.current?.click()}
+                        disabled={uploadBusy}
+                        className="underline underline-offset-2 disabled:opacity-50"
+                      >
+                        {uploadBusy
+                          ? "Uploading..."
+                          : current.fulltext_path
+                            ? "Replace PDF"
+                            : "Upload PDF"}
+                      </button>
+                      {pdfUrl && current.abstract && (
+                        <>
+                          {" · "}
+                          <button
+                            onClick={() => setShowAbstract(!showAbstract)}
+                            className="underline underline-offset-2"
+                          >
+                            {showAbstract ? "Hide abstract" : "Show abstract"}
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
                 </p>
-                {current.abstract ? (
-                  <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
-                    <Highlighted
-                      text={current.abstract}
-                      include={project.include_keywords}
-                      exclude={project.exclude_keywords}
+                {(stage !== "full_text" || !pdfUrl || showAbstract) &&
+                  (current.abstract ? (
+                    <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
+                      <Highlighted
+                        text={current.abstract}
+                        include={project.include_keywords}
+                        exclude={project.exclude_keywords}
+                      />
+                    </p>
+                  ) : (
+                    <p className="italic text-zinc-400 dark:text-zinc-500">
+                      No abstract in the export for this record.
+                    </p>
+                  ))}
+                {stage === "full_text" &&
+                  (pdfUrl ? (
+                    <iframe
+                      src={pdfUrl}
+                      title="Full text PDF"
+                      className="mt-3 min-h-[55vh] w-full flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700"
                     />
-                  </p>
-                ) : (
-                  <p className="italic text-zinc-400 dark:text-zinc-500">
-                    No abstract in the export for this record.
-                  </p>
-                )}
+                  ) : current.fulltext_path ? (
+                    <p className="mt-3 text-sm text-zinc-400">Loading PDF...</p>
+                  ) : (
+                    <p className="mt-3 rounded-lg border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                      No PDF uploaded for this record yet. Use the DOI or Link
+                      above to retrieve it, then click Upload PDF to read it
+                      here (and later in the concept matrix). If it cannot be
+                      accessed at all, press N.
+                    </p>
+                  ))}
               </article>
 
               <div className="flex flex-wrap items-center justify-center gap-3 pb-2">
