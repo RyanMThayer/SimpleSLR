@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/client";
 import ImportClient from "@/components/project/ImportClient";
 import { parseSearchString, type ParseResult } from "@/lib/parseSearchString";
 import {
+  collectDependents,
+  repairDependents,
+  repairSummary,
+} from "@/lib/rededupe";
+import {
   KIND_HINTS,
   STANDARD_DATABASES,
   generateQuery,
@@ -246,10 +251,16 @@ export default function DiscoveryClient({
 
   async function deleteBatch(batch: ImportBatch) {
     const ok = window.confirm(
-      `Delete this import (${batch.filename ?? "file"}, ${batch.record_count} records)? The records and any screening decisions on them are removed permanently.`
+      `Delete this import (${batch.filename ?? "file"}, ${batch.record_count} records)? The records and any screening decisions on them are removed permanently. Records from other sources that were marked as duplicates of these will be re-checked and restored where appropriate.`
     );
     if (!ok) return;
     const supabase = createClient();
+    const { data: idRows } = await supabase
+      .from("records")
+      .select("id")
+      .eq("batch_id", batch.id);
+    const deletedIds = (idRows ?? []).map((r) => r.id);
+    const dependents = await collectDependents(project.id, deletedIds);
     const { error: recErr } = await supabase
       .from("records")
       .delete()
@@ -266,7 +277,16 @@ export default function DiscoveryClient({
       setError(delErr.message);
       return;
     }
-    setMessage("Import deleted.");
+    try {
+      const repair = await repairDependents(
+        project.id,
+        dependents,
+        new Set(deletedIds)
+      );
+      setMessage(`Import deleted.${repairSummary(repair)}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
     load();
   }
 
@@ -274,10 +294,19 @@ export default function DiscoveryClient({
     const dbBatches = batches.filter((b) => b.database_id === db.id);
     const recordCount = dbBatches.reduce((s, b) => s + b.record_count, 0);
     const ok = window.confirm(
-      `Remove ${db.name} from this review? This deletes its ${dbBatches.length} import(s) with ${recordCount} records, including any screening decisions on them.`
+      `Remove ${db.name} from this review? This deletes its ${dbBatches.length} import(s) with ${recordCount} records, including any screening decisions on them. Records from other sources that were deduplicated against these will be re-checked and restored where appropriate.`
     );
     if (!ok) return;
     const supabase = createClient();
+    const deletedIds: string[] = [];
+    for (const b of dbBatches) {
+      const { data: idRows } = await supabase
+        .from("records")
+        .select("id")
+        .eq("batch_id", b.id);
+      (idRows ?? []).forEach((r) => deletedIds.push(r.id));
+    }
+    const dependents = await collectDependents(project.id, deletedIds);
     for (const b of dbBatches) {
       const { error: recErr } = await supabase
         .from("records")
@@ -304,7 +333,16 @@ export default function DiscoveryClient({
       setError(dbErr.message);
       return;
     }
-    setMessage(`${db.name} removed.`);
+    try {
+      const repair = await repairDependents(
+        project.id,
+        dependents,
+        new Set(deletedIds)
+      );
+      setMessage(`${db.name} removed.${repairSummary(repair)}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
     load();
   }
 

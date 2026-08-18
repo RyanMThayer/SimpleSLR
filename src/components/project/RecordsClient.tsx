@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
+import {
+  collectDependents,
+  repairDependents,
+  repairSummary,
+} from "@/lib/rededupe";
 import type {
   ExclusionReason,
   ImportBatch,
@@ -200,10 +205,19 @@ export default function RecordsClient({
 
   async function deleteSource(src: SourceSummary) {
     const ok = window.confirm(
-      `Delete all ${src.imported} records imported from ${src.name}, including any screening decisions on them? The database itself stays available for a fresh import. This cannot be undone.`
+      `Delete all ${src.imported} records imported from ${src.name}, including any screening decisions on them? Records from other sources that were deduplicated against these will be re-checked and restored where appropriate. The database itself stays available for a fresh import. This cannot be undone.`
     );
     if (!ok) return;
     const supabase = createClient();
+    const deletedIds: string[] = [];
+    for (let i = 0; i < src.batchIds.length; i += 100) {
+      const { data: idRows } = await supabase
+        .from("records")
+        .select("id")
+        .in("batch_id", src.batchIds.slice(i, i + 100));
+      (idRows ?? []).forEach((r) => deletedIds.push(r.id));
+    }
+    const dependents = await collectDependents(projectId, deletedIds);
     const { error: recErr } = await supabase
       .from("records")
       .delete()
@@ -219,6 +233,11 @@ export default function RecordsClient({
     if (batchErr) {
       setError(batchErr.message);
       return;
+    }
+    try {
+      await repairDependents(projectId, dependents, new Set(deletedIds));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
     if (sourceFilter === src.key) setSourceFilter("all");
     setPage(0);
@@ -274,6 +293,7 @@ export default function RecordsClient({
     );
     if (!ok) return;
     const supabase = createClient();
+    const dependents = await collectDependents(projectId, [r.id]);
     const { error: delErr } = await supabase
       .from("records")
       .delete()
@@ -281,6 +301,17 @@ export default function RecordsClient({
     if (delErr) {
       setError(delErr.message);
       return;
+    }
+    try {
+      const repair = await repairDependents(
+        projectId,
+        dependents,
+        new Set([r.id])
+      );
+      const note = repairSummary(repair);
+      if (note) setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
     setExpanded(null);
     loadSources();
