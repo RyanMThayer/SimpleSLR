@@ -48,6 +48,8 @@ export type ProjectDatabase = {
   created_at: string;
 };
 
+export type BatchOrigin = "database" | "snowball_backward" | "snowball_forward";
+
 export type ImportBatch = {
   id: string;
   project_id: string;
@@ -56,6 +58,8 @@ export type ImportBatch = {
   record_count: number;
   imported_by: string | null;
   database_id: string | null;
+  origin: BatchOrigin;
+  seed_record_id: string | null;
   created_at: string;
 };
 

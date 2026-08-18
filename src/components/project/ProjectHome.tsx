@@ -394,6 +394,12 @@ export default function ProjectHome({
             Review near match pairs
           </p>
         </Link>
+        <Link href={`/projects/${project.id}/snowball`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Snowball</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Backward and forward citation search
+          </p>
+        </Link>
         <Link href={`/projects/${project.id}/prisma`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
             PRISMA and exports

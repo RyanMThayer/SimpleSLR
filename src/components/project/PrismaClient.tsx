@@ -25,6 +25,7 @@ type Data = {
 
 type Counts = {
   identified: number;
+  viaSnowball: number;
   perSource: { name: string; imported: number; rawHits: number | null }[];
   duplicates: number;
   screened: number;
@@ -110,6 +111,14 @@ function computeCounts(d: Data): Counts {
   }
 
   const dbById = new Map(d.databases.map((x) => [x.id, x]));
+  // Batches created before the snowball migration have no origin column;
+  // treat those as ordinary database imports.
+  const snowballBatchIds = new Set(
+    d.batches.filter((b) => b.origin?.startsWith("snowball")).map((b) => b.id)
+  );
+  const viaSnowball = d.records.filter(
+    (r) => r.batch_id && snowballBatchIds.has(r.batch_id)
+  ).length;
   const perSourceMap = new Map<string, { imported: number; rawHits: number | null }>();
   for (const b of d.batches) {
     const name = b.database_id
@@ -125,6 +134,7 @@ function computeCounts(d: Data): Counts {
 
   return {
     identified: d.records.length,
+    viaSnowball,
     perSource: [...perSourceMap.entries()].map(([name, v]) => ({ name, ...v })),
     duplicates,
     screened: active.length,
@@ -177,8 +187,16 @@ function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: numb
   });
 
   const identify = mk(MAIN_X, MAIN_W, [
-    "Records identified from databases",
+    c.viaSnowball > 0
+      ? "Records identified"
+      : "Records identified from databases",
     `(n = ${c.identified})`,
+    ...(c.viaSnowball > 0
+      ? [
+          `From database searches (n = ${c.identified - c.viaSnowball})`,
+          `Via snowballing (n = ${c.viaSnowball})`,
+        ]
+      : []),
     ...sourceLines,
   ]);
   const dupBox = mk(SIDE_X, SIDE_W, [
