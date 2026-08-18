@@ -265,7 +265,7 @@ export default function ProjectHome({
         )}
       </section>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link href={`/projects/${project.id}/discovery`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Discovery</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -275,7 +275,7 @@ export default function ProjectHome({
         <Link href={`/projects/${project.id}/screen`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Screen</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Title and abstract, keyboard first
+            Title/abstract and full text stages
           </p>
         </Link>
         <Link href={`/projects/${project.id}/records`} className={tile}>
@@ -284,10 +284,24 @@ export default function ProjectHome({
             Browse, search, and audit
           </p>
         </Link>
+        <Link href={`/projects/${project.id}/duplicates`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Duplicates</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Review near match pairs
+          </p>
+        </Link>
+        <Link href={`/projects/${project.id}/prisma`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
+            PRISMA and exports
+          </h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Flow diagram, RIS, CSV, backup
+          </p>
+        </Link>
         <Link href={`/projects/${project.id}/settings`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Settings</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Criteria, keywords, reasons
+            Name and highlight keywords
           </p>
         </Link>
       </div>

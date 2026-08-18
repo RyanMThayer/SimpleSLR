@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { outcomeOf } from "@/lib/outcomes";
 import type {
   Decision,
   ExclusionReason,
   Project,
   RecordRow,
+  Stage,
 } from "@/lib/types";
 
-const STAGE = "title_abstract" as const;
 const QUEUE_PAGE = 500;
 
 function escapeRegExp(s: string) {
@@ -107,6 +108,7 @@ export default function ScreenClient({
   project: Project;
   userId: string;
 }) {
+  const [stage, setStage] = useState<Stage>("title_abstract");
   const [queue, setQueue] = useState<RecordRow[] | null>(null);
   const [idx, setIdx] = useState(0);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
@@ -148,7 +150,7 @@ export default function ScreenClient({
         .from("screening_decisions")
         .select("record_id")
         .eq("project_id", project.id)
-        .eq("stage", STAGE)
+        .eq("stage", stage)
         .eq("decided_by", userId)
         .range(from, from + 999);
       if (dErr) {
@@ -157,6 +159,54 @@ export default function ScreenClient({
       }
       (data ?? []).forEach((d) => decided.add(d.record_id));
       if (!data || data.length < 1000) break;
+    }
+
+    if (stage === "full_text") {
+      // Eligible records: team level outcome "included" at title/abstract.
+      const taByRecord = new Map<string, { decision: string }[]>();
+      for (let from = 0; ; from += 1000) {
+        const { data, error: tErr } = await supabase
+          .from("screening_decisions")
+          .select("record_id, decision")
+          .eq("project_id", project.id)
+          .eq("stage", "title_abstract")
+          .range(from, from + 999);
+        if (tErr) {
+          setError(tErr.message);
+          return;
+        }
+        (data ?? []).forEach((d) => {
+          const list = taByRecord.get(d.record_id) ?? [];
+          list.push(d);
+          taByRecord.set(d.record_id, list);
+        });
+        if (!data || data.length < 1000) break;
+      }
+      const includeIds = [...taByRecord.entries()]
+        .filter(([, decs]) => outcomeOf(decs) === "included")
+        .map(([id]) => id);
+
+      const recs: RecordRow[] = [];
+      for (let i = 0; i < includeIds.length; i += 100) {
+        const { data } = await supabase
+          .from("records")
+          .select("*")
+          .eq("status", "active")
+          .in("id", includeIds.slice(i, i + 100));
+        recs.push(...((data ?? []) as RecordRow[]));
+      }
+      // Assignment rule: my assigned records if any; otherwise the whole
+      // eligible set (the full text pile is small and usually shared).
+      const mineAssigned = recs.filter((r) => r.assigned_to === userId);
+      const eligible = mineAssigned.length > 0 ? mineAssigned : recs;
+      eligible.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const remaining = eligible.filter((r) => !decided.has(r.id));
+      setMineTotal(eligible.length);
+      setMineDone(eligible.length - remaining.length);
+      setError(null);
+      setQueue(remaining);
+      setIdx(0);
+      return;
     }
 
     // Queue mode: records assigned to me if any exist, otherwise the
@@ -205,7 +255,7 @@ export default function ScreenClient({
     setError(null);
     setQueue(remaining);
     setIdx(0);
-  }, [project.id, userId]);
+  }, [project.id, userId, stage]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
@@ -231,11 +281,13 @@ export default function ScreenClient({
       if (!current || !queue || saving) return;
       setSaving(true);
       const supabase = createClient();
+      // At the full text stage PRISMA wants a reason for every exclusion.
+      if (stage === "full_text" && decision === "exclude" && !reasonId) return;
       const { error: insErr } = await supabase.from("screening_decisions").upsert(
         {
           project_id: project.id,
           record_id: current.id,
-          stage: STAGE,
+          stage,
           decision,
           reason_id: reasonId,
           decided_by: userId,
@@ -257,7 +309,7 @@ export default function ScreenClient({
       // The queue loads in pages; when a page is exhausted, fetch the next.
       if (nq.length === 0) load();
     },
-    [current, saving, project.id, userId, queue, idx, load]
+    [current, saving, project.id, userId, queue, idx, load, stage]
   );
 
   const undo = useCallback(async () => {
@@ -268,7 +320,7 @@ export default function ScreenClient({
       .from("screening_decisions")
       .delete()
       .eq("record_id", last.rec.id)
-      .eq("stage", STAGE)
+      .eq("stage", stage)
       .eq("decided_by", userId);
     if (delErr) {
       setError(delErr.message);
@@ -281,7 +333,7 @@ export default function ScreenClient({
     setIdx(pos);
     setMineDone((d) => Math.max(0, d - 1));
     setCanUndo(undoStack.current.length > 0);
-  }, [userId, queue]);
+  }, [userId, queue, stage]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -305,7 +357,7 @@ export default function ScreenClient({
         e.preventDefault();
       } else if (k === "i") {
         decide("include");
-      } else if (k === "e") {
+      } else if (k === "e" && stage !== "full_text") {
         decide("exclude");
       } else if (k === "u") {
         undo();
@@ -313,7 +365,7 @@ export default function ScreenClient({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, decide, undo, goNext, goPrev, editConfirm]);
+  }, [reasons, decide, undo, goNext, goPrev, editConfirm, stage]);
 
   // ----- criteria editing -----
 
@@ -451,13 +503,44 @@ export default function ScreenClient({
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
+      <div className="mb-4 flex gap-2">
+        {(
+          [
+            ["title_abstract", "Title and abstract"],
+            ["full_text", "Full text"],
+          ] as [Stage, string][]
+        ).map(([s, label]) => (
+          <button
+            key={s}
+            onClick={() => {
+              if (s !== stage) {
+                setStage(s);
+                setQueue(null);
+                undoStack.current = [];
+                setCanUndo(false);
+              }
+            }}
+            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
+              stage === s
+                ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-4">
         <div className="mb-1 flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
           <span>
-            Title and abstract screening · {mineDone} / {mineTotal} done ({pct}%)
+            {stage === "full_text" ? "Full text screening" : "Title and abstract screening"}
+            {" · "}
+            {mineDone} / {mineTotal} done ({pct}%)
           </span>
           <span className="hidden lg:inline">
-            Keys: 1-9 exclude with reason · I include · E exclude · ←/→ skip · U undo
+            Keys: 1-9 exclude with reason · I include
+            {stage !== "full_text" && <> · E exclude</>} · ←/→ skip · U undo
             {queue && queue.length > 1 && (
               <> · viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length} undecided</>
             )}
@@ -488,9 +571,9 @@ export default function ScreenClient({
                 Queue empty. Nice work.
               </h2>
               <p className="max-w-md text-zinc-600 dark:text-zinc-400">
-                You have screened everything currently assigned to you. Import
-                more records, ask the owner to distribute unassigned ones, or
-                review the results in the records table.
+                {stage === "full_text"
+                  ? "No records are waiting for full text screening. Records arrive here once the team includes them at the title and abstract stage."
+                  : "You have screened everything currently assigned to you. Import more records, ask the owner to distribute unassigned ones, or review the results in the records table."}
               </p>
               <div className="flex gap-3">
                 <Link
@@ -579,13 +662,15 @@ export default function ScreenClient({
                 >
                   Skip (→)
                 </button>
-                <button
-                  onClick={() => decide("exclude")}
-                  disabled={saving}
-                  className={`${btn} bg-red-600 text-white hover:bg-red-500`}
-                >
-                  Exclude, no reason (E)
-                </button>
+                {stage !== "full_text" && (
+                  <button
+                    onClick={() => decide("exclude")}
+                    disabled={saving}
+                    className={`${btn} bg-red-600 text-white hover:bg-red-500`}
+                  >
+                    Exclude, no reason (E)
+                  </button>
+                )}
                 <button
                   onClick={undo}
                   disabled={!canUndo}
