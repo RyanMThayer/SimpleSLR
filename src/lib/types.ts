@@ -60,6 +60,8 @@ export type ImportBatch = {
   database_id: string | null;
   origin: BatchOrigin;
   seed_record_id: string | null;
+  /** New candidates surfaced by the snowball round (before selection). */
+  raw_hit_count: number | null;
   created_at: string;
 };
 

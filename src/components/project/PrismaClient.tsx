@@ -200,6 +200,11 @@ function computeCounts(d: Data): Counts {
       snowball: Boolean(b.origin?.startsWith("snowball")),
     };
     entry.imported += b.record_count;
+    // Snowball batches carry their own candidate counts (0011 onward),
+    // so the table can show found vs imported for those rounds too.
+    if (!b.database_id && b.raw_hit_count != null) {
+      entry.rawHits = (entry.rawHits ?? 0) + b.raw_hit_count;
+    }
     perSourceMap.set(name, entry);
   }
 

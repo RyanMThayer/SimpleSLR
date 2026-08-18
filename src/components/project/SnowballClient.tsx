@@ -177,7 +177,9 @@ export default function SnowballClient({
         citedBy: work.cited_by_count ?? 0,
         sources,
         existing,
-        selected: false,
+        // Everything new starts selected: the default path is to import
+        // all candidates and let formal screening decide.
+        selected: !existing,
       };
     });
     list.sort((a, b) => {
@@ -318,6 +320,16 @@ export default function SnowballClient({
       await supabase
         .from("import_batches")
         .update({ record_count: rows.length })
+        .eq("id", batch.id);
+      // Candidates this round surfaced in this direction, before any
+      // selection: the snowball analog of a database's raw hit count.
+      // Best effort; fails harmlessly before migration 0011.
+      const foundInDir = candidates.filter(
+        (c) => !c.existing && c.sources[0].dir === dir
+      ).length;
+      await supabase
+        .from("import_batches")
+        .update({ raw_hit_count: foundInDir })
         .eq("id", batch.id);
     }
     setImporting(false);
@@ -481,6 +493,13 @@ export default function SnowballClient({
               Clear
             </button>
           </div>
+          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+            All new candidates start selected. The clean method is to import
+            everything and let title/abstract screening decide, so every
+            exclusion is on record. Deselect only broken metadata or scope
+            cuts you will report in your methods; whatever you deselect here
+            never appears in your PRISMA numbers.
+          </p>
 
           <div className="mb-3 flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
             {candidates.map((c) => (
