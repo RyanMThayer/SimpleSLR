@@ -52,7 +52,7 @@ export default function SettingsClient({ project }: { project: Project }) {
       </h1>
 
       <div className="mb-6 flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-xs text-zinc-400">
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
           The research objective and questions live on the project page. The
           search string and limits live on the Discovery page. The inclusion
           and exclusion criteria and the exclusion reasons live in the

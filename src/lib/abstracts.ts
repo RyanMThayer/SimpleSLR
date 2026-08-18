@@ -37,26 +37,61 @@ function tidy(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Does this text plausibly read as an abstract? Scholarly indexes
+ * (OpenAlex especially) sometimes store junk in the abstract field:
+ * author lists, the paper's reference section, or one line publisher
+ * notes. Rejecting those beats importing them; a blank abstract can be
+ * filled from another source or pasted by hand.
+ */
+export function plausibleAbstract(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  const text = raw.trim();
+  if (text.length < 120) return false;
+  const words = text.split(/\s+/);
+  if (words.length < 25) return false;
+  // Reference lists: dense years in parentheses, DOIs, bracket numbers.
+  const years = (text.match(/\((?:1[89]|20)\d{2}\)/g) ?? []).length;
+  const dois = (text.match(/\bdoi\b|doi\.org/gi) ?? []).length;
+  const brackets = (text.match(/\[\d+\]/g) ?? []).length;
+  if (years + dois >= 5 || brackets >= 6) return false;
+  if (years + dois + brackets >= 3 && (years + dois + brackets) / words.length > 0.02) {
+    return false;
+  }
+  // Author lists: mostly capitalized tokens with dense separators.
+  const caps = words.filter((w) => /^[A-Z]/.test(w)).length;
+  const seps = (text.match(/[,;]/g) ?? []).length;
+  if (caps / words.length > 0.6 && seps >= words.length / 5) return false;
+  return true;
+}
+
 export type AbstractSearchResult = {
   updates: AbstractUpdate[];
   notes: string[];
 };
 
+/** The record fields abstract lookup needs; RecordRow satisfies this. */
+export type LookupRecord = Pick<
+  RecordRow,
+  "id" | "title" | "abstract" | "doi" | "norm_doi" | "norm_title"
+>;
+
 /**
- * Find abstracts for every record in `records` that lacks one. Pure
+ * Find abstracts for every record in `records` whose abstract is
+ * missing or fails the plausibility check (junk from an index). Pure
  * lookup: returns proposed updates, does not write to the database.
  */
 export async function findMissingAbstracts(
-  records: RecordRow[],
+  records: LookupRecord[],
   onProgress: (msg: string) => void
 ): Promise<AbstractSearchResult> {
-  const missing = records.filter((r) => !r.abstract?.trim());
+  const missing = records.filter((r) => !plausibleAbstract(r.abstract));
   const updates: AbstractUpdate[] = [];
   const notes: string[] = [];
   const found = new Set<string>();
 
-  const byDoi = new Map<string, RecordRow[]>();
-  const noDoi: RecordRow[] = [];
+  const byDoi = new Map<string, LookupRecord[]>();
+  const noDoi: LookupRecord[] = [];
   for (const r of missing) {
     const d = r.norm_doi ?? normalizeDoi(r.doi);
     // Pipes and commas are OpenAlex filter syntax; such DOIs are rare
@@ -92,7 +127,7 @@ export async function findMissingAbstracts(
         const d = normalizeDoi(w.doi);
         if (!d) continue;
         const text = reconstructAbstract(w.abstract_inverted_index);
-        if (text) push(d, tidy(text), "OpenAlex");
+        if (text && plausibleAbstract(text)) push(d, tidy(text), "OpenAlex");
       }
     } catch {
       notes.push("An OpenAlex batch failed; some DOIs were skipped there.");
@@ -121,7 +156,9 @@ export async function findMissingAbstracts(
         );
       }
       (body.results as (string | null)[]).forEach((abs, j) => {
-        if (abs) push(chunk[j], tidy(abs), "Semantic Scholar");
+        if (abs && plausibleAbstract(abs)) {
+          push(chunk[j], tidy(abs), "Semantic Scholar");
+        }
       });
     } catch (e) {
       notes.push(
@@ -149,7 +186,7 @@ export async function findMissingAbstracts(
       const body = await res.json();
       if (typeof body.abstract === "string") {
         const text = jatsToText(body.abstract);
-        if (text) push(forCr[i], text, "Crossref");
+        if (text && plausibleAbstract(text)) push(forCr[i], text, "Crossref");
       }
     } catch {
       /* skip this DOI */
@@ -164,7 +201,7 @@ export async function findMissingAbstracts(
       const w = await resolveWork(r);
       if (!w) continue;
       const text = reconstructAbstract(w.abstract_inverted_index);
-      if (text) {
+      if (text && plausibleAbstract(text)) {
         found.add(r.id);
         updates.push({
           recordId: r.id,
@@ -180,7 +217,7 @@ export async function findMissingAbstracts(
       const body = await res.json();
       if (typeof body.abstract === "string") {
         const cleaned = jatsToText(body.abstract);
-        if (cleaned) {
+        if (cleaned && plausibleAbstract(cleaned)) {
           found.add(r.id);
           updates.push({
             recordId: r.id,

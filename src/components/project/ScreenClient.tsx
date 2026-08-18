@@ -155,9 +155,10 @@ export default function ScreenClient({
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [showAbstract, setShowAbstract] = useState(false);
-  // Pasting an abstract for records that came without one
+  // Pasting or fixing a record's abstract from the screening room
   const [pasteAbs, setPasteAbs] = useState("");
   const [pasteBusy, setPasteBusy] = useState(false);
+  const [editingAbs, setEditingAbs] = useState(false);
   const [pdfExpanded, setPdfExpanded] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -386,6 +387,7 @@ export default function ScreenClient({
 
     setShowAbstract(false);
     setPasteAbs("");
+    setEditingAbs(false);
     if (stage === "full_text" && current?.fulltext_path) {
       signedFulltextUrl(current.fulltext_path).then((res) => {
         if (cancelled) return;
@@ -543,6 +545,7 @@ export default function ScreenClient({
         : q
     );
     setPasteAbs("");
+    setEditingAbs(false);
   }
 
   useEffect(() => {
@@ -963,14 +966,54 @@ export default function ScreenClient({
                   )}
                 </p>
                 {(stage !== "full_text" || !pdfUrl || showAbstract) &&
-                  (current.abstract ? (
-                    <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
-                      <Highlighted
-                        text={current.abstract}
-                        include={project.include_keywords}
-                        exclude={project.exclude_keywords}
+                  (editingAbs ? (
+                    <div className="mt-1 flex max-w-3xl flex-col gap-2">
+                      <textarea
+                        value={pasteAbs}
+                        onChange={(e) => setPasteAbs(e.target.value)}
+                        rows={6}
+                        autoFocus
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                       />
-                    </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={saveAbstract}
+                          disabled={pasteBusy || !pasteAbs.trim()}
+                          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          {pasteBusy ? "Saving..." : "Save abstract"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingAbs(false);
+                            setPasteAbs("");
+                          }}
+                          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : current.abstract ? (
+                    <div>
+                      <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
+                        <Highlighted
+                          text={current.abstract}
+                          include={project.include_keywords}
+                          exclude={project.exclude_keywords}
+                        />
+                      </p>
+                      <button
+                        onClick={() => {
+                          setEditingAbs(true);
+                          setPasteAbs(current.abstract ?? "");
+                        }}
+                        className="mt-1 text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                        title="Fix an imported abstract that is wrong or garbled"
+                      >
+                        Edit abstract
+                      </button>
+                    </div>
                   ) : (
                     <div>
                       <p className="italic text-zinc-400 dark:text-zinc-500">

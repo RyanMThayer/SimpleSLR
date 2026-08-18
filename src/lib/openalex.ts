@@ -72,8 +72,13 @@ export function shortId(id: string): string {
   return id.replace(/^https?:\/\/openalex\.org\//, "");
 }
 
+export type ResolvableRecord = Pick<
+  RecordRow,
+  "title" | "doi" | "norm_doi" | "norm_title"
+>;
+
 /** Resolve one of our records to an OpenAlex work (DOI first, title fallback). */
-export async function resolveWork(record: RecordRow): Promise<OaWork | null> {
+export async function resolveWork(record: ResolvableRecord): Promise<OaWork | null> {
   const doi = record.norm_doi ?? normalizeDoi(record.doi);
   if (doi) {
     try {

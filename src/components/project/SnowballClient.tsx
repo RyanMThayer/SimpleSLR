@@ -13,6 +13,7 @@ import {
   workToRef,
   type OaWork,
 } from "@/lib/openalex";
+import { findMissingAbstracts, plausibleAbstract } from "@/lib/abstracts";
 import type { ParsedRef, RecordRow } from "@/lib/types";
 
 type Direction = "backward" | "forward";
@@ -236,6 +237,14 @@ export default function SnowballClient({
     let imported = 0;
     let duplicates = 0;
     let linksMissing = false;
+    const newActive: {
+      id: string;
+      title: string;
+      abstract: string | null;
+      doi: string | null;
+      norm_doi: string | null;
+      norm_title: string | null;
+    }[] = [];
     for (const dir of ["backward", "forward"] as Direction[]) {
       const group = picked.filter((c) => c.sources[0].dir === dir);
       if (group.length === 0) continue;
@@ -281,7 +290,9 @@ export default function SnowballClient({
           authors: c.ref.authors,
           year: c.ref.year,
           venue: c.ref.venue,
-          abstract: c.ref.abstract,
+          // OpenAlex abstract fields sometimes hold junk (author lists,
+          // reference sections); a blank beats importing that.
+          abstract: plausibleAbstract(c.ref.abstract) ? c.ref.abstract : null,
           doi: c.ref.doi,
           url: c.ref.url,
           source_label: `Snowball ${dir}`,
@@ -300,6 +311,18 @@ export default function SnowballClient({
           setImporting(false);
           return;
         }
+        (inserted ?? []).forEach((row, j) => {
+          const src = rows[i + j];
+          if (!src || src.status !== "active") return;
+          newActive.push({
+            id: row.id,
+            title: src.title,
+            abstract: src.abstract,
+            doi: src.doi,
+            norm_doi: src.norm_doi,
+            norm_title: src.norm_title,
+          });
+        });
         // Per seed provenance: one link per (paper, seed, direction).
         const linkRows: {
           project_id: string;
@@ -349,13 +372,41 @@ export default function SnowballClient({
         .update({ raw_hit_count: foundInDir })
         .eq("id", batch.id);
     }
+    // Fill missing abstracts for the fresh imports right away, so they
+    // arrive in the screening queue readable.
+    let absNote = "";
+    const missingAbs = newActive.filter((r) => !plausibleAbstract(r.abstract));
+    if (missingAbs.length > 0) {
+      try {
+        setProgress("Fetching missing abstracts for the imported records...");
+        const { updates } = await findMissingAbstracts(newActive, setProgress);
+        for (let i = 0; i < updates.length; i += 20) {
+          await Promise.all(
+            updates
+              .slice(i, i + 20)
+              .map((u) =>
+                supabase
+                  .from("records")
+                  .update({ abstract: u.abstract })
+                  .eq("id", u.recordId)
+              )
+          );
+        }
+        absNote = ` Abstracts: filled ${updates.length} of ${missingAbs.length} missing automatically; the rest can be pasted during screening.`;
+      } catch {
+        absNote =
+          " Abstract lookup could not run; use Find missing abstracts on the Records page later.";
+      }
+      setProgress(null);
+    }
+
     setImporting(false);
     setResult(
       `Imported ${imported + duplicates} snowball record(s): ${imported} new, ${duplicates} marked as duplicates. New records join title/abstract screening: distribute them from the project home, or they appear in the unassigned pool once your own assigned queue is done.${
         linksMissing
           ? " (Per seed provenance was not recorded: run supabase/migrations/0010_snowball_links.sql.)"
           : ""
-      }`
+      }${absNote}`
     );
     setCandidates(null);
     load();
@@ -511,7 +562,7 @@ export default function SnowballClient({
               Clear
             </button>
           </div>
-          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">
             All new candidates start selected. The clean method is to import
             everything and let title/abstract screening decide, so every
             exclusion is on record. Deselect only broken metadata or scope
@@ -587,7 +638,7 @@ export default function SnowballClient({
             disabled={importing || selectedCount === 0}
             className={primaryBtn}
           >
-            {importing ? "Importing..." : `Import ${selectedCount} selected`}
+            {importing ? (progress ?? "Importing...") : `Import ${selectedCount} selected`}
           </button>
         </section>
       )}

@@ -716,7 +716,7 @@ export default function ConceptsClient({
               <h2 className="mb-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                 Concepts in this paper
               </h2>
-              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">
                 Tick what the paper discusses. To attach evidence, copy a
                 passage in the PDF and paste it as a quote.
               </p>
@@ -785,7 +785,7 @@ export default function ConceptsClient({
                   Add
                 </button>
               </div>
-              <p className="mt-2 text-xs text-zinc-400">
+              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                 New concepts mid reading are normal; that is how the set
                 emerges. Rename and merge from the matrix page.
               </p>

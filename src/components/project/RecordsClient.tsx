@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import { outcomeOf } from "@/lib/outcomes";
-import { findMissingAbstracts } from "@/lib/abstracts";
+import { findMissingAbstracts, plausibleAbstract } from "@/lib/abstracts";
 import {
   removeFulltext,
   removeFulltextPaths,
@@ -368,9 +368,11 @@ export default function RecordsClient({
         all.push(...((data ?? []) as RecordRow[]));
         if (!data || data.length < 1000) break;
       }
-      const missingBefore = all.filter((r) => !r.abstract?.trim()).length;
+      const missingBefore = all.filter(
+        (r) => !plausibleAbstract(r.abstract)
+      ).length;
       if (missingBefore === 0) {
-        setAbsMsg("Every active record already has an abstract.");
+        setAbsMsg("Every active record already has a plausible abstract.");
         setAbsBusy(false);
         return;
       }
@@ -747,9 +749,9 @@ export default function RecordsClient({
         >
           {absBusy ? "Searching..." : "Find missing abstracts"}
         </button>
-        <p className="min-w-0 flex-1 text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="min-w-0 flex-1 text-sm text-zinc-600 dark:text-zinc-300">
           {absMsg ??
-            "Looks up every active record without an abstract in OpenAlex, Semantic Scholar, and Crossref (free scholarly indexes). Whatever stays missing can be pasted by hand in the screening room or via Edit."}
+            "Looks up every active record whose abstract is missing or looks like index junk (author lists, reference sections) in OpenAlex, Semantic Scholar, and Crossref. Whatever stays missing can be pasted by hand in the screening room or via Edit."}
         </p>
       </div>
 
