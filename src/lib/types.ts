@@ -2,11 +2,15 @@ export type SearchFields = {
   title: boolean;
   abstract: boolean;
   keywords: boolean;
+  /** Search the entire record (all fields); overrides the three above. */
+  fullRecord: boolean;
 };
 
 export type SearchGroup = {
   /** Terms OR'd together inside this concept group. */
   terms: string[];
+  /** When true, this group is excluded (NOT) instead of required. */
+  not?: boolean;
 };
 
 export type SearchLimits = {
@@ -24,8 +28,8 @@ export type SearchConfig = {
 };
 
 export const EMPTY_SEARCH_CONFIG: SearchConfig = {
-  groups: [{ terms: [] }],
-  fields: { title: true, abstract: true, keywords: true },
+  groups: [{ terms: [], not: false }],
+  fields: { title: true, abstract: true, keywords: true, fullRecord: false },
   limits: { languages: "", yearFrom: null, yearTo: null, pubTypes: "", notes: "" },
 };
 

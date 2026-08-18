@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ImportClient from "@/components/project/ImportClient";
 import {
-  DEFAULT_DATABASES,
   KIND_HINTS,
+  STANDARD_DATABASES,
   generateQuery,
   hydrateConfig,
   limitsSummary,
@@ -42,6 +42,8 @@ export default function DiscoveryClient({
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [termInputs, setTermInputs] = useState<Record<number, string>>({});
   const [newDbName, setNewDbName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [importOpenFor, setImportOpenFor] = useState<string | null>(null);
   const [copiedFor, setCopiedFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,14 +69,26 @@ export default function DiscoveryClient({
       return;
     }
     let rows = (dbRows ?? []) as ProjectDatabase[];
-    if (rows.length === 0) {
-      // First visit: seed the standard databases.
+    // Seed (or top up) the standard database list. Existing rows are
+    // matched by kind for the known syntaxes and by name otherwise, so
+    // nothing the team already configured is duplicated or touched.
+    const firstVisit = rows.length === 0;
+    const missing = STANDARD_DATABASES.filter((std) => {
+      if (std.kind !== "custom") {
+        return !rows.some((r) => r.kind === std.kind);
+      }
+      return !rows.some(
+        (r) => r.name.trim().toLowerCase() === std.name.toLowerCase()
+      );
+    });
+    if (missing.length > 0) {
       const { error: seedErr } = await supabase.from("project_databases").insert(
-        DEFAULT_DATABASES.map((d, i) => ({
+        missing.map((d, i) => ({
           project_id: project.id,
           name: d.name,
           kind: d.kind,
-          position: i,
+          enabled: firstVisit ? Boolean(d.defaultEnabled) : false,
+          position: STANDARD_DATABASES.findIndex((s) => s.name === d.name) + i,
         }))
       );
       if (!seedErr) {
@@ -82,7 +96,8 @@ export default function DiscoveryClient({
           .from("project_databases")
           .select("*")
           .eq("project_id", project.id)
-          .order("position");
+          .order("position")
+          .order("created_at");
         rows = (seeded ?? []) as ProjectDatabase[];
       }
     }
@@ -280,6 +295,16 @@ export default function DiscoveryClient({
   const limits = limitsSummary(config);
   const unlinkedBatches = batches.filter((b) => b.database_id === null);
 
+  const isStandard = (db: ProjectDatabase) =>
+    db.kind !== "custom" ||
+    STANDARD_DATABASES.some(
+      (s) => s.name.toLowerCase() === db.name.trim().toLowerCase()
+    );
+  const stdNoteFor = (db: ProjectDatabase) =>
+    STANDARD_DATABASES.find(
+      (s) => s.name.toLowerCase() === db.name.trim().toLowerCase()
+    )?.note;
+
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -324,22 +349,43 @@ export default function DiscoveryClient({
           <div key={gi}>
             {gi > 0 && (
               <p className="my-2 text-center text-xs font-bold tracking-widest text-zinc-400">
-                AND
+                {group.not ? "AND NOT" : "AND"}
               </p>
             )}
-            <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
-              <div className="mb-2 flex items-center justify-between">
+            <div
+              className={`rounded-lg border p-3 ${
+                group.not
+                  ? "border-red-300 dark:border-red-900"
+                  : "border-zinc-200 dark:border-zinc-700"
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                  Concept {gi + 1}
+                  {group.not ? `Excluded terms (NOT)` : `Concept ${gi + 1}`}
                 </span>
-                {config.groups.length > 1 && (
-                  <button
-                    onClick={() => removeGroup(gi)}
-                    className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
-                  >
-                    remove group
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(group.not)}
+                      onChange={(e) => {
+                        const groups = config.groups.map((g, i) =>
+                          i === gi ? { ...g, not: e.target.checked } : g
+                        );
+                        updateConfig({ ...config, groups });
+                      }}
+                    />
+                    NOT (exclude these)
+                  </label>
+                  {config.groups.length > 1 && (
+                    <button
+                      onClick={() => removeGroup(gi)}
+                      className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                    >
+                      remove group
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {group.terms.map((t, ti) => (
@@ -389,12 +435,16 @@ export default function DiscoveryClient({
           <button onClick={addGroup} className={ghostBtn}>
             + Concept group (AND)
           </button>
-          <div className="flex items-center gap-3 text-sm text-zinc-700 dark:text-zinc-300">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-700 dark:text-zinc-300">
             <span className="font-medium">Search in:</span>
             {(["title", "abstract", "keywords"] as const).map((f) => (
-              <label key={f} className="flex items-center gap-1">
+              <label
+                key={f}
+                className={`flex items-center gap-1 ${config.fields.fullRecord ? "opacity-40" : ""}`}
+              >
                 <input
                   type="checkbox"
+                  disabled={config.fields.fullRecord}
                   checked={config.fields[f]}
                   onChange={(e) =>
                     updateConfig({
@@ -406,6 +456,22 @@ export default function DiscoveryClient({
                 {f}
               </label>
             ))}
+            <label
+              className="flex items-center gap-1 border-l border-zinc-200 pl-3 dark:border-zinc-700"
+              title="Searches every field the database indexes (Scopus ALL, WoS ALL=, IEEE All Metadata). Broader but noisier than title/abstract/keywords."
+            >
+              <input
+                type="checkbox"
+                checked={config.fields.fullRecord}
+                onChange={(e) =>
+                  updateConfig({
+                    ...config,
+                    fields: { ...config.fields, fullRecord: e.target.checked },
+                  })
+                }
+              />
+              entire record (overrides the three)
+            </label>
           </div>
         </div>
       </section>
@@ -520,14 +586,42 @@ export default function DiscoveryClient({
           hit count when you run the search; both feed the PRISMA diagram.
         </p>
 
+        {databases !== null && databases.some((d) => !d.enabled) && (
+          <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Check a database to add it to the search strategy
+            </p>
+            <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+              {databases
+                .filter((d) => !d.enabled)
+                .map((db) => (
+                  <label
+                    key={db.id}
+                    className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+                    title={stdNoteFor(db) ?? undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={() => updateDb(db.id, { enabled: true })}
+                    />
+                    <span className="truncate">{db.name}</span>
+                  </label>
+                ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4">
           {databases === null ? (
             <p className="text-sm text-zinc-500">Loading databases...</p>
           ) : (
-            databases.map((db) => {
+            databases.filter((d) => d.enabled).map((db) => {
               const query = generateQuery(db.kind, config);
               const dbBatches = batches.filter((b) => b.database_id === db.id);
               const imported = dbBatches.reduce((s, b) => s + b.record_count, 0);
+              const note = stdNoteFor(db);
+              const removable = !isStandard(db) && dbBatches.length === 0;
               return (
                 <div key={db.id} className={card}>
                   <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -536,20 +630,64 @@ export default function DiscoveryClient({
                         type="checkbox"
                         checked={db.enabled}
                         onChange={(e) => updateDb(db.id, { enabled: e.target.checked })}
-                        title="Part of this review's search strategy"
+                        title="Uncheck to take this database out of the search strategy (imported records stay)"
                       />
-                      {db.name}
+                      {renamingId === db.id ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (renameValue.trim()) {
+                              updateDb(db.id, { name: renameValue.trim() });
+                            }
+                            setRenamingId(null);
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <input
+                            className={`${inputCls} h-8 py-0`}
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            autoFocus
+                          />
+                          <button type="submit" className="text-xs underline underline-offset-2">
+                            Save
+                          </button>
+                        </form>
+                      ) : (
+                        db.name
+                      )}
                     </label>
                     <span className="text-xs text-zinc-400">
                       {imported > 0 ? `${imported} imported` : "nothing imported yet"}
                     </span>
-                    <button
-                      onClick={() => deleteDatabase(db)}
-                      className="ml-auto text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
-                    >
-                      remove database
-                    </button>
+                    <div className="ml-auto flex items-center gap-3">
+                      {renamingId !== db.id && (
+                        <button
+                          onClick={() => {
+                            setRenamingId(db.id);
+                            setRenameValue(db.name);
+                          }}
+                          className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                          title="Rename, e.g. to note the exact edition searched"
+                        >
+                          rename
+                        </button>
+                      )}
+                      {removable && (
+                        <button
+                          onClick={() => deleteDatabase(db)}
+                          className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                        >
+                          remove
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  {note && (
+                    <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                      {note}
+                    </p>
+                  )}
 
                   {db.enabled && (
                     <>

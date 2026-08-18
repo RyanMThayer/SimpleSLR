@@ -3,12 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
-import type { RecordRow, ScreeningDecision } from "@/lib/types";
+import type { ImportBatch, RecordRow, ScreeningDecision } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | "active" | "duplicate";
 type DecisionFilter = "all" | "include" | "exclude" | "maybe" | "undecided";
+
+type SourceSummary = {
+  key: string; // database id, or "unlinked"
+  name: string;
+  batchIds: string[];
+  imported: number;
+  duplicates: number;
+};
 
 type EditForm = {
   title: string;
@@ -31,6 +39,8 @@ export default function RecordsClient({
   const [decisions, setDecisions] = useState<Map<string, ScreeningDecision[]>>(
     new Map()
   );
+  const [sources, setSources] = useState<SourceSummary[] | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
@@ -42,8 +52,79 @@ export default function RecordsClient({
   const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const loadSources = useCallback(async () => {
+    const supabase = createClient();
+    const [dbRes, batchRes] = await Promise.all([
+      supabase
+        .from("project_databases")
+        .select("id, name")
+        .eq("project_id", projectId),
+      supabase
+        .from("import_batches")
+        .select("*")
+        .eq("project_id", projectId),
+    ]);
+    const dbs = (dbRes.data ?? []) as { id: string; name: string }[];
+    const allBatches = (batchRes.data ?? []) as ImportBatch[];
+
+    const raw: SourceSummary[] = [];
+    for (const db of dbs) {
+      const ids = allBatches
+        .filter((b) => b.database_id === db.id)
+        .map((b) => b.id);
+      if (ids.length === 0) continue;
+      raw.push({
+        key: db.id,
+        name: db.name,
+        batchIds: ids,
+        imported: allBatches
+          .filter((b) => b.database_id === db.id)
+          .reduce((s, b) => s + b.record_count, 0),
+        duplicates: 0,
+      });
+    }
+    const unlinkedIds = allBatches
+      .filter((b) => b.database_id === null)
+      .map((b) => b.id);
+    if (unlinkedIds.length > 0) {
+      raw.push({
+        key: "unlinked",
+        name: "Unlinked imports",
+        batchIds: unlinkedIds,
+        imported: allBatches
+          .filter((b) => b.database_id === null)
+          .reduce((s, b) => s + b.record_count, 0),
+        duplicates: 0,
+      });
+    }
+
+    const withDups = await Promise.all(
+      raw.map(async (s) => {
+        const { count } = await supabase
+          .from("records")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", projectId)
+          .eq("status", "duplicate")
+          .in("batch_id", s.batchIds);
+        return { ...s, duplicates: count ?? 0 };
+      })
+    );
+    setSources(withDups);
+  }, [projectId]);
+
   const load = useCallback(async () => {
     const supabase = createClient();
+    let batchIds: string[] | null = null;
+    if (sourceFilter !== "all") {
+      const src = sources?.find((s) => s.key === sourceFilter);
+      batchIds = src?.batchIds ?? [];
+      if (batchIds.length === 0) {
+        setRows([]);
+        setTotal(0);
+        return;
+      }
+    }
+
     let query = supabase
       .from("records")
       .select("*", { count: "exact" })
@@ -52,6 +133,7 @@ export default function RecordsClient({
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
     if (status !== "all") query = query.eq("status", status);
     if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+    if (batchIds) query = query.in("batch_id", batchIds);
 
     const { data, count, error: qErr } = await query;
     if (qErr) {
@@ -90,13 +172,47 @@ export default function RecordsClient({
         )
       );
     }
-  }, [projectId, page, search, status, decisionFilter]);
+  }, [projectId, page, search, status, decisionFilter, sourceFilter, sources]);
+
+  useEffect(() => {
+    // Fetch-on-mount: state updates happen after awaits inside loadSources().
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSources();
+  }, [loadSources]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  async function deleteSource(src: SourceSummary) {
+    const ok = window.confirm(
+      `Delete all ${src.imported} records imported from ${src.name}, including any screening decisions on them? The database itself stays available for a fresh import. This cannot be undone.`
+    );
+    if (!ok) return;
+    const supabase = createClient();
+    const { error: recErr } = await supabase
+      .from("records")
+      .delete()
+      .in("batch_id", src.batchIds);
+    if (recErr) {
+      setError(recErr.message);
+      return;
+    }
+    const { error: batchErr } = await supabase
+      .from("import_batches")
+      .delete()
+      .in("id", src.batchIds);
+    if (batchErr) {
+      setError(batchErr.message);
+      return;
+    }
+    if (sourceFilter === src.key) setSourceFilter("all");
+    setPage(0);
+    loadSources();
+    load();
+  }
 
   function startEdit(r: RecordRow) {
     setEditingId(r.id);
@@ -155,6 +271,7 @@ export default function RecordsClient({
       return;
     }
     setExpanded(null);
+    loadSources();
     load();
   }
 
@@ -171,10 +288,12 @@ export default function RecordsClient({
       setError(upErr.message);
       return;
     }
+    loadSources();
     load();
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalDuplicates = sources?.reduce((s, x) => s + x.duplicates, 0) ?? 0;
 
   const badge = (decision: string) =>
     decision === "include"
@@ -229,6 +348,64 @@ export default function RecordsClient({
         </select>
       </div>
 
+      {sources !== null && sources.length > 0 && (
+        <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Sources
+            </p>
+            <p className="text-xs text-zinc-400">
+              {totalDuplicates} duplicates across all sources
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                setSourceFilter("all");
+                setPage(0);
+              }}
+              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                sourceFilter === "all"
+                  ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                  : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              }`}
+            >
+              All sources
+            </button>
+            {sources.map((s) => (
+              <span
+                key={s.key}
+                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                  sourceFilter === s.key
+                    ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                    : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
+                }`}
+              >
+                <button
+                  onClick={() => {
+                    setSourceFilter(sourceFilter === s.key ? "all" : s.key);
+                    setPage(0);
+                  }}
+                  className="hover:underline"
+                  title="Show only records from this source"
+                >
+                  {s.name}: {s.imported}
+                  {s.duplicates > 0 && <> ({s.duplicates} dup)</>}
+                </button>
+                <button
+                  onClick={() => deleteSource(s)}
+                  className="opacity-60 hover:opacity-100"
+                  title={`Delete all records imported from ${s.name}`}
+                  aria-label={`Delete all records from ${s.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && (
         <p className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
           {error}
@@ -260,8 +437,15 @@ export default function RecordsClient({
                   }}
                   className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 >
-                  <span className="flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                    {r.title}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                      {r.title}
+                    </span>
+                    {r.authors && (
+                      <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                        {r.authors}
+                      </span>
+                    )}
                   </span>
                   {r.source_label && (
                     <span className="hidden max-w-32 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 sm:inline dark:bg-zinc-800 dark:text-zinc-400">
