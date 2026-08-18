@@ -55,29 +55,46 @@ export default function SnowballClient({
 
   const load = useCallback(async () => {
     const supabase = createClient();
-    // Team level title/abstract includes are the seed pool.
-    const taByRecord = new Map<string, { decision: string }[]>();
-    for (let from = 0; ; from += 1000) {
-      const { data, error: dErr } = await supabase
-        .from("screening_decisions")
-        .select("record_id, decision")
-        .eq("project_id", projectId)
-        .eq("stage", "title_abstract")
-        .range(from, from + 999);
-      if (dErr) {
-        setError(dErr.message);
-        return;
+    // Webster and Watson: the seed pool is the included set, meaning
+    // papers that survived full text screening, not everything that
+    // merely passed title/abstract.
+    const byStage = async (stage: string) => {
+      const map = new Map<string, { decision: string }[]>();
+      for (let from = 0; ; from += 1000) {
+        const { data, error: dErr } = await supabase
+          .from("screening_decisions")
+          .select("record_id, decision")
+          .eq("project_id", projectId)
+          .eq("stage", stage)
+          .range(from, from + 999);
+        if (dErr) throw new Error(dErr.message);
+        (data ?? []).forEach((d) => {
+          const list = map.get(d.record_id) ?? [];
+          list.push(d);
+          map.set(d.record_id, list);
+        });
+        if (!data || data.length < 1000) break;
       }
-      (data ?? []).forEach((d) => {
-        const list = taByRecord.get(d.record_id) ?? [];
-        list.push(d);
-        taByRecord.set(d.record_id, list);
-      });
-      if (!data || data.length < 1000) break;
+      return map;
+    };
+    let includeIds: string[];
+    try {
+      const taByRecord = await byStage("title_abstract");
+      const ftByRecord = await byStage("full_text");
+      const taIncluded = new Set(
+        [...taByRecord.entries()]
+          .filter(([, decs]) => outcomeOf(decs) === "included")
+          .map(([id]) => id)
+      );
+      includeIds = [...ftByRecord.entries()]
+        .filter(
+          ([id, decs]) => taIncluded.has(id) && outcomeOf(decs) === "included"
+        )
+        .map(([id]) => id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
     }
-    const includeIds = [...taByRecord.entries()]
-      .filter(([, decs]) => outcomeOf(decs) === "included")
-      .map(([id]) => id);
     const recs: RecordRow[] = [];
     for (let i = 0; i < includeIds.length; i += 100) {
       const { data } = await supabase
@@ -402,8 +419,9 @@ export default function SnowballClient({
           <p className="text-sm text-zinc-500">Loading included records...</p>
         ) : seeds.length === 0 ? (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            No records are included at title/abstract yet; snowballing starts
-            from your included papers.
+            No papers are included after full text screening yet. Webster and
+            Watson snowball from the included set, so finish full text
+            screening first; newly included papers then appear here as seeds.
           </p>
         ) : (
           <div className="mb-3 flex flex-col gap-1">

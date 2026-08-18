@@ -20,6 +20,26 @@ import type {
 
 const QUEUE_PAGE = 500;
 
+/** Undecided records in the unassigned pool, counted without paging limits. */
+async function remainingPoolCount(projectId: string, decided: Set<string>) {
+  const supabase = createClient();
+  let remaining = 0;
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from("records")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("status", "active")
+      .is("assigned_to", null)
+      .range(from, from + 999);
+    (data ?? []).forEach((r) => {
+      if (!decided.has(r.id)) remaining++;
+    });
+    if (!data || data.length < 1000) break;
+  }
+  return remaining;
+}
+
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -126,6 +146,11 @@ export default function ScreenClient({
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const undoStack = useRef<{ rec: RecordRow; at: number }[]>([]);
+  // Review mode: walk through records already screened at this stage.
+  const [reviewing, setReviewing] = useState(false);
+  const [myDecisions, setMyDecisions] = useState<
+    Map<string, { decision: Decision; reason_id: string | null }>
+  >(new Map());
 
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -163,10 +188,14 @@ export default function ScreenClient({
 
     // Which records has this user already decided at this stage?
     const decided = new Set<string>();
+    const myDecs = new Map<
+      string,
+      { decision: Decision; reason_id: string | null }
+    >();
     for (let from = 0; ; from += 1000) {
       const { data, error: dErr } = await supabase
         .from("screening_decisions")
-        .select("record_id")
+        .select("record_id, decision, reason_id")
         .eq("project_id", project.id)
         .eq("stage", stage)
         .eq("decided_by", userId)
@@ -175,8 +204,38 @@ export default function ScreenClient({
         setError(dErr.message);
         return;
       }
-      (data ?? []).forEach((d) => decided.add(d.record_id));
+      (data ?? []).forEach((d) => {
+        decided.add(d.record_id);
+        myDecs.set(d.record_id, {
+          decision: d.decision as Decision,
+          reason_id: d.reason_id,
+        });
+      });
       if (!data || data.length < 1000) break;
+    }
+    setMyDecisions(myDecs);
+
+    if (reviewing) {
+      // Walk everything I have decided at this stage, oldest first, so
+      // any decision can be revisited and changed in place.
+      const ids = [...decided];
+      const mine: RecordRow[] = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data } = await supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", project.id)
+          .eq("status", "active")
+          .in("id", ids.slice(i, i + 100));
+        mine.push(...((data ?? []) as RecordRow[]));
+      }
+      mine.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      setMineTotal(mine.length);
+      setMineDone(mine.length);
+      setError(null);
+      setQueue(mine);
+      setIdx(0);
+      return;
     }
 
     if (stage === "full_text") {
@@ -225,14 +284,22 @@ export default function ScreenClient({
         (r) => r.ft_assigned_to === userId
       );
       const mineRemaining = mineAssigned.filter((r) => !decided.has(r.id));
-      const eligible =
-        mineRemaining.length > 0
-          ? mineAssigned
-          : retrievable.filter((r) => r.ft_assigned_to === null);
-      eligible.sort((a, b) => a.created_at.localeCompare(b.created_at));
-      const remaining = eligible.filter((r) => !decided.has(r.id));
-      setMineTotal(eligible.length);
-      setMineDone(eligible.length - remaining.length);
+      const pool = retrievable.filter((r) => r.ft_assigned_to === null);
+      const poolRemaining = pool.filter((r) => !decided.has(r.id));
+      const eligible = mineRemaining.length > 0 ? mineAssigned : pool;
+      const remaining =
+        mineRemaining.length > 0 ? mineRemaining : poolRemaining;
+      // Progress reflects whichever set feeds the queue; once everything
+      // is decided, fall back to my assigned totals so a finished stage
+      // reads 100% instead of 0 / 0.
+      if (remaining.length > 0 || mineAssigned.length === 0) {
+        setMineTotal(eligible.length);
+        setMineDone(eligible.length - remaining.length);
+      } else {
+        setMineTotal(mineAssigned.length);
+        setMineDone(mineAssigned.length);
+      }
+      remaining.sort((a, b) => a.created_at.localeCompare(b.created_at));
       setError(null);
       setQueue(remaining);
       setIdx(0);
@@ -283,13 +350,24 @@ export default function ScreenClient({
         .eq("project_id", project.id)
         .eq("status", "active")
         .is("assigned_to", null);
-      setMineTotal(poolCount ?? 0);
-      setMineDone(decided.size);
+      if ((poolCount ?? 0) > 0 || (assignedCount ?? 0) === 0) {
+        const remPool =
+          (poolCount ?? 0) > 0
+            ? await remainingPoolCount(project.id, decided)
+            : 0;
+        setMineTotal(poolCount ?? 0);
+        setMineDone(Math.max(0, (poolCount ?? 0) - remPool));
+      } else {
+        // Everything assigned to me is decided and no pool remains:
+        // a finished stage should read 100%, not 0 / 0.
+        setMineTotal(assignedCount ?? 0);
+        setMineDone(assignedCount ?? 0);
+      }
     }
     setError(null);
     setQueue(remaining);
     setIdx(0);
-  }, [project.id, userId, stage]);
+  }, [project.id, userId, stage, reviewing]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
@@ -372,7 +450,18 @@ export default function ScreenClient({
         setError(insErr.message);
         return;
       }
+      setMyDecisions((m) => {
+        const next = new Map(m);
+        next.set(current.id, { decision, reason_id: reasonId });
+        return next;
+      });
       const at = Math.min(idx, queue.length - 1);
+      if (reviewing) {
+        // Revisiting: the decision is updated in place and the record
+        // stays in the review queue; just move to the next one.
+        setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+        return;
+      }
       undoStack.current.push({ rec: current, at });
       setCanUndo(true);
       const nq = [...queue.slice(0, at), ...queue.slice(at + 1)];
@@ -382,7 +471,7 @@ export default function ScreenClient({
       // The queue loads in pages; when a page is exhausted, fetch the next.
       if (nq.length === 0) load();
     },
-    [current, saving, project.id, userId, queue, idx, load, stage]
+    [current, saving, project.id, userId, queue, idx, load, stage, reviewing]
   );
 
   const markNoAccess = useCallback(async () => {
@@ -399,14 +488,19 @@ export default function ScreenClient({
       return;
     }
     const at = Math.min(idx, queue.length - 1);
+    if (reviewing) {
+      setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+      return;
+    }
     const nq = [...queue.slice(0, at), ...queue.slice(at + 1)];
     setQueue(nq);
     setIdx(at >= nq.length ? 0 : at);
     setMineTotal((t) => Math.max(0, t - 1));
     if (nq.length === 0) load();
-  }, [current, queue, saving, stage, idx, load]);
+  }, [current, queue, saving, stage, idx, load, reviewing]);
 
   const undo = useCallback(async () => {
+    if (reviewing) return;
     const last = undoStack.current.pop();
     if (!last) return;
     const supabase = createClient();
@@ -427,7 +521,7 @@ export default function ScreenClient({
     setIdx(pos);
     setMineDone((d) => Math.max(0, d - 1));
     setCanUndo(undoStack.current.length > 0);
-  }, [userId, queue, stage]);
+  }, [userId, queue, stage, reviewing]);
 
   async function saveAbstract() {
     if (!current || !pasteAbs.trim() || pasteBusy) return;
@@ -620,7 +714,11 @@ export default function ScreenClient({
   const hasCriteria = Boolean(incText.trim() || excText.trim());
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
+    <main
+      className={`mx-auto flex w-full flex-1 flex-col px-6 py-6 ${
+        stage === "full_text" ? "max-w-[1700px]" : "max-w-6xl"
+      }`}
+    >
       <input
         type="file"
         accept="application/pdf,.pdf"
@@ -640,6 +738,7 @@ export default function ScreenClient({
             onClick={() => {
               if (s !== stage) {
                 setStage(s);
+                setReviewing(false);
                 setQueue(null);
                 undoStack.current = [];
                 setCanUndo(false);
@@ -661,23 +760,69 @@ export default function ScreenClient({
           <span>
             {stage === "full_text" ? "Full text screening" : "Title and abstract screening"}
             {" · "}
-            {mineDone} / {mineTotal} done ({pct}%)
+            {reviewing ? (
+              <>
+                reviewing {queue?.length ?? 0} screened record(s){" · "}
+                <button
+                  onClick={() => {
+                    setReviewing(false);
+                    setQueue(null);
+                  }}
+                  className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
+                  back to the queue
+                </button>
+              </>
+            ) : (
+              <>
+                {mineDone} / {mineTotal} done ({pct}%)
+              </>
+            )}
           </span>
           <span className="hidden lg:inline">
             Keys: 1-9 exclude with reason · I include
             {stage !== "full_text" ? <> · E exclude</> : <> · N no access</>} ·
-            ←/→ skip · U undo
+            ←/→ skip{reviewing ? null : <> · U undo</>}
             {queue && queue.length > 1 && (
-              <> · viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length} undecided</>
+              <>
+                {" · "}viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length}{" "}
+                {reviewing ? "screened" : "undecided"}
+              </>
             )}
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
           <div
             className="h-full rounded-full bg-emerald-500 transition-all"
-            style={{ width: `${pct}%` }}
+            style={{ width: `${reviewing ? 100 : pct}%` }}
           />
         </div>
+        {reviewing && current && (
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            Your current decision:{" "}
+            {(() => {
+              const d = myDecisions.get(current.id);
+              if (!d)
+                return <span className="font-medium">none recorded</span>;
+              if (d.decision === "include")
+                return (
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                    Include
+                  </span>
+                );
+              const ri = d.reason_id
+                ? reasons.findIndex((r) => r.id === d.reason_id)
+                : -1;
+              return (
+                <span className="font-medium text-red-600 dark:text-red-400">
+                  Exclude
+                  {ri >= 0 ? `: E${ri + 1} (${reasons[ri].label})` : ""}
+                </span>
+              );
+            })()}{" "}
+            · press a key to change it, arrows to move on.
+          </p>
+        )}
       </div>
 
       {error && (
@@ -697,11 +842,24 @@ export default function ScreenClient({
                 Queue empty. Nice work.
               </h2>
               <p className="max-w-md text-zinc-600 dark:text-zinc-400">
-                {stage === "full_text"
-                  ? "No records are waiting for full text screening. Records arrive here once the team includes them at the title and abstract stage."
-                  : "You have screened everything currently assigned to you. Import more records, ask the owner to distribute unassigned ones, or review the results in the records table."}
+                {reviewing
+                  ? "You have no screened records at this stage to review."
+                  : stage === "full_text"
+                    ? "No records are waiting for full text screening. Records arrive here once the team includes them at the title and abstract stage."
+                    : "You have screened everything currently assigned to you. Import more records, ask the owner to distribute unassigned ones, or review the results in the records table."}
               </p>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap justify-center gap-3">
+                {!reviewing && myDecisions.size > 0 && (
+                  <button
+                    onClick={() => {
+                      setReviewing(true);
+                      setQueue(null);
+                    }}
+                    className={`${btn} border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
+                  >
+                    Review my screened records ({myDecisions.size})
+                  </button>
+                )}
                 <Link
                   href={`/projects/${project.id}`}
                   className={`${btn} bg-zinc-900 text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300`}
