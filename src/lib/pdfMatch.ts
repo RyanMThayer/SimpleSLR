@@ -155,22 +155,29 @@ export function matchRecord(
   }
 
   // 3. Fuzzy fallback: token overlap against the page 1 head zone only.
+  // Requires a clear margin over the runner-up, so topically similar
+  // titles sharing vocabulary cannot both qualify, and is always
+  // labeled for verification: bag-of-words scores are suggestions,
+  // never certainty.
   const head = norm1.slice(0, HEAD_LIMIT);
-  let best: { r: RecordRow; score: number } | null = null;
-  for (const r of candidates) {
-    const t = titleOf(r);
-    if (!t || t.length < 15) continue;
-    const tokens = t.split(" ").filter((w) => w.length > 3);
-    if (tokens.length < 4) continue;
-    const hits = tokens.filter((w) => head.includes(w)).length;
-    const score = hits / tokens.length;
-    if (score > (best?.score ?? 0)) best = { r, score };
-  }
-  if (best && best.score >= 0.85) {
+  const scored = candidates
+    .map((r) => {
+      const t = titleOf(r);
+      if (!t || t.length < 15) return null;
+      const tokens = t.split(" ").filter((w) => w.length > 3);
+      if (tokens.length < 4) return null;
+      const hits = tokens.filter((w) => head.includes(w)).length;
+      return { r, score: hits / tokens.length };
+    })
+    .filter((x): x is { r: RecordRow; score: number } => x !== null)
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  const second = scored[1];
+  if (best && best.score >= 0.85 && best.score - (second?.score ?? 0) >= 0.1) {
     return {
       record: best.r,
-      label: `title ${(best.score * 100).toFixed(0)}%`,
-      note: "",
+      label: `title ${(best.score * 100).toFixed(0)}% (verify)`,
+      note: "Matched by word overlap in the title zone, not an exact title; confirm before uploading.",
     };
   }
 

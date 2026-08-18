@@ -240,9 +240,10 @@ export default function BulkPdfUpload({
                       ? "text-emerald-600"
                       : row.status === "error"
                         ? "text-red-600"
-                        : row.matchLabel === "no match"
-                          ? "text-amber-600"
-                          : "text-zinc-400"
+                        : row.matchLabel === "no match" ||
+                          row.matchLabel.includes("verify")
+                        ? "text-amber-600"
+                        : "text-zinc-400"
                   }
                 >
                   {row.status === "parsing"
