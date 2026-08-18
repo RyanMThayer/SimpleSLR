@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ImportClient from "@/components/project/ImportClient";
+import { parseSearchString, type ParseResult } from "@/lib/parseSearchString";
 import {
   KIND_HINTS,
   STANDARD_DATABASES,
@@ -41,6 +42,9 @@ export default function DiscoveryClient({
   const [databases, setDatabases] = useState<ProjectDatabase[] | null>(null);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [termInputs, setTermInputs] = useState<Record<number, string>>({});
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [newDbName, setNewDbName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -164,6 +168,28 @@ export default function DiscoveryClient({
   function removeGroup(groupIdx: number) {
     const groups = config.groups.filter((_, i) => i !== groupIdx);
     updateConfig({ ...config, groups: groups.length ? groups : [{ terms: [] }] });
+  }
+
+  function runParse() {
+    setParsed(parseSearchString(pasteText));
+  }
+
+  function applyParsed(mode: "replace" | "append") {
+    if (!parsed || !parsed.ok) return;
+    const groups =
+      mode === "replace"
+        ? parsed.groups
+        : [
+            ...config.groups.filter((g) => g.terms.length > 0),
+            ...parsed.groups,
+          ];
+    updateConfig({ ...config, groups });
+    setPasteOpen(false);
+    setPasteText("");
+    setParsed(null);
+    setMessage(
+      'Search string applied to the builder. Review the groups, then click "Save search setup".'
+    );
   }
 
   async function saveConfig() {
@@ -336,14 +362,113 @@ export default function DiscoveryClient({
 
       {/* ---------------- Search string builder ---------------- */}
       <section className={`${card} mb-6`}>
-        <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-          Search string
-        </h2>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            Search string
+          </h2>
+          <button
+            onClick={() => {
+              setPasteOpen(!pasteOpen);
+              setParsed(null);
+            }}
+            className={`${ghostBtn} px-3 py-1 text-xs`}
+          >
+            {pasteOpen ? "Close paste box" : "Paste an existing string"}
+          </button>
+        </div>
         <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
           Concept groups are combined with AND; terms inside a group with OR.
           Phrases get quotes automatically; type * yourself for truncation
           (e.g. refugee*).
         </p>
+
+        {pasteOpen && (
+          <div className="mb-4 rounded-lg border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+            <p className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">
+              Paste a boolean search string from a document or another
+              database. Handles AND/OR/NOT in any case, parentheses, quoted
+              phrases (including Word&apos;s curly quotes), and database
+              wrappers like TITLE-ABS-KEY( ) or TS=( ). It becomes editable
+              concept groups below.
+            </p>
+            <textarea
+              className={`${inputCls} min-h-24 w-full font-mono text-xs`}
+              placeholder={'("term one" OR "term two") AND (other* OR another)'}
+              value={pasteText}
+              onChange={(e) => {
+                setPasteText(e.target.value);
+                setParsed(null);
+              }}
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={runParse}
+                disabled={!pasteText.trim()}
+                className={primaryBtn}
+              >
+                Parse
+              </button>
+            </div>
+
+            {parsed && !parsed.ok && (
+              <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                {parsed.error}
+              </p>
+            )}
+
+            {parsed && parsed.ok && (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Preview: {parsed.groups.length} group(s)
+                </p>
+                <div className="mb-2 flex flex-col gap-2">
+                  {parsed.groups.map((g, i) => (
+                    <div
+                      key={i}
+                      className={`flex flex-wrap items-center gap-1 rounded-lg border p-2 ${
+                        g.not
+                          ? "border-red-300 dark:border-red-900"
+                          : "border-zinc-200 dark:border-zinc-700"
+                      }`}
+                    >
+                      <span className="mr-1 text-xs font-semibold text-zinc-400">
+                        {g.not ? "NOT" : `G${i + 1}`}
+                      </span>
+                      {g.terms.map((t, ti) => (
+                        <span
+                          key={ti}
+                          className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                {parsed.warnings.length > 0 && (
+                  <ul className="mb-3 flex flex-col gap-1">
+                    {parsed.warnings.map((w, i) => (
+                      <li
+                        key={i}
+                        className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                      >
+                        {w}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => applyParsed("replace")} className={primaryBtn}>
+                    Replace current groups
+                  </button>
+                  <button onClick={() => applyParsed("append")} className={ghostBtn}>
+                    Add below current groups
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {config.groups.map((group, gi) => (
           <div key={gi}>
