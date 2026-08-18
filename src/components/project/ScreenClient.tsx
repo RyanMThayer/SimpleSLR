@@ -195,10 +195,20 @@ export default function ScreenClient({
           .in("id", includeIds.slice(i, i + 100));
         recs.push(...((data ?? []) as RecordRow[]));
       }
-      // Assignment rule: my assigned records if any; otherwise the whole
-      // eligible set (the full text pile is small and usually shared).
-      const mineAssigned = recs.filter((r) => r.assigned_to === userId);
-      const eligible = mineAssigned.length > 0 ? mineAssigned : recs;
+      // Records marked unretrievable leave the queue (they are reported
+      // separately in the PRISMA diagram).
+      const retrievable = recs.filter(
+        (r) => r.retrieval_status !== "not_retrieved"
+      );
+      // Full text assignment rule: my ft-assigned records if any exist,
+      // otherwise the unassigned pool.
+      const mineAssigned = retrievable.filter(
+        (r) => r.ft_assigned_to === userId
+      );
+      const eligible =
+        mineAssigned.length > 0
+          ? mineAssigned
+          : retrievable.filter((r) => r.ft_assigned_to === null);
       eligible.sort((a, b) => a.created_at.localeCompare(b.created_at));
       const remaining = eligible.filter((r) => !decided.has(r.id));
       setMineTotal(eligible.length);
@@ -312,6 +322,27 @@ export default function ScreenClient({
     [current, saving, project.id, userId, queue, idx, load, stage]
   );
 
+  const markNoAccess = useCallback(async () => {
+    if (!current || !queue || saving || stage !== "full_text") return;
+    setSaving(true);
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({ retrieval_status: "not_retrieved" })
+      .eq("id", current.id);
+    setSaving(false);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    const at = Math.min(idx, queue.length - 1);
+    const nq = [...queue.slice(0, at), ...queue.slice(at + 1)];
+    setQueue(nq);
+    setIdx(at >= nq.length ? 0 : at);
+    setMineTotal((t) => Math.max(0, t - 1));
+    if (nq.length === 0) load();
+  }, [current, queue, saving, stage, idx, load]);
+
   const undo = useCallback(async () => {
     const last = undoStack.current.pop();
     if (!last) return;
@@ -359,13 +390,15 @@ export default function ScreenClient({
         decide("include");
       } else if (k === "e" && stage !== "full_text") {
         decide("exclude");
+      } else if (k === "n" && stage === "full_text") {
+        markNoAccess();
       } else if (k === "u") {
         undo();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, decide, undo, goNext, goPrev, editConfirm, stage]);
+  }, [reasons, decide, undo, goNext, goPrev, markNoAccess, editConfirm, stage]);
 
   // ----- criteria editing -----
 
@@ -540,7 +573,8 @@ export default function ScreenClient({
           </span>
           <span className="hidden lg:inline">
             Keys: 1-9 exclude with reason · I include
-            {stage !== "full_text" && <> · E exclude</>} · ←/→ skip · U undo
+            {stage !== "full_text" ? <> · E exclude</> : <> · N no access</>} ·
+            ←/→ skip · U undo
             {queue && queue.length > 1 && (
               <> · viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length} undecided</>
             )}
@@ -662,13 +696,22 @@ export default function ScreenClient({
                 >
                   Skip (→)
                 </button>
-                {stage !== "full_text" && (
+                {stage !== "full_text" ? (
                   <button
                     onClick={() => decide("exclude")}
                     disabled={saving}
                     className={`${btn} bg-red-600 text-white hover:bg-red-500`}
                   >
                     Exclude, no reason (E)
+                  </button>
+                ) : (
+                  <button
+                    onClick={markNoAccess}
+                    disabled={saving}
+                    className={`${btn} border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
+                    title="Full text could not be accessed; reported as 'not retrieved' in the PRISMA diagram"
+                  >
+                    No access (N)
                   </button>
                 )}
                 <button

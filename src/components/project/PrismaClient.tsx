@@ -32,6 +32,8 @@ type Counts = {
   taIncluded: number;
   taConflicts: number;
   taUndecided: number;
+  notRetrieved: number;
+  assessed: number;
   ftExcludedByReason: { label: string; count: number }[];
   ftExcluded: number;
   ftIncluded: number;
@@ -77,11 +79,17 @@ function computeCounts(d: Data): Counts {
   const ftMap = decisionsByRecord(d.decisions, "full_text");
   const reasonLabel = new Map(d.reasons.map((r) => [r.id, r.label]));
   const ftReasonCounts = new Map<string, number>();
+  const recById = new Map(d.records.map((r) => [r.id, r]));
   let ftExcluded = 0,
     ftIncluded = 0,
-    ftUndecided = 0;
+    ftUndecided = 0,
+    notRetrieved = 0;
   const ftRecordIds = new Set<string>();
   for (const id of taRecordIds) {
+    if (recById.get(id)?.retrieval_status === "not_retrieved") {
+      notRetrieved++;
+      continue;
+    }
     const decs = ftMap.get(id) ?? [];
     const o = outcomeOf(decs);
     if (o === "excluded") {
@@ -124,6 +132,8 @@ function computeCounts(d: Data): Counts {
     taIncluded,
     taConflicts,
     taUndecided,
+    notRetrieved,
+    assessed: taIncluded - notRetrieved,
     ftExcludedByReason: [...ftReasonCounts.entries()]
       .map(([label, count]) => ({ label, count }))
       .sort((a, b) => b.count - a.count),
@@ -180,9 +190,17 @@ function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: numb
     "Records excluded at title/abstract",
     `(n = ${c.taExcluded})`,
   ]);
+  const sought = mk(MAIN_X, MAIN_W, [
+    "Reports sought for retrieval",
+    `(n = ${c.taIncluded})`,
+  ]);
+  const notRet = mk(SIDE_X, SIDE_W, [
+    "Reports not retrieved",
+    `(n = ${c.notRetrieved})`,
+  ]);
   const assessed = mk(MAIN_X, MAIN_W, [
     "Reports assessed for eligibility",
-    `(n = ${c.taIncluded})`,
+    `(n = ${c.assessed})`,
   ]);
   const ftExc = mk(SIDE_X, SIDE_W, [
     `Reports excluded (n = ${c.ftExcluded}):`,
@@ -198,6 +216,8 @@ function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: numb
   y += identify.h + GAP;
   const screenedB: Box = { ...screened, y };
   y += screened.h + GAP;
+  const soughtB: Box = { ...sought, y };
+  y += sought.h + GAP;
   const assessedB: Box = { ...assessed, y };
   y += assessed.h + GAP;
   const includedB: Box = { ...included, y };
@@ -205,20 +225,33 @@ function layoutDiagram(c: Counts): { boxes: Box[]; arrows: string[]; width: numb
 
   const dupB: Box = { ...dupBox, y: identifyB.y + (identifyB.h - dupBox.h) / 2 };
   const taExcB: Box = { ...taExc, y: screenedB.y + (screenedB.h - taExc.h) / 2 };
+  const notRetB: Box = { ...notRet, y: soughtB.y + (soughtB.h - notRet.h) / 2 };
   const ftExcB: Box = { ...ftExc, y: assessedB.y + (assessedB.h - ftExc.h) / 2 };
 
   const midMain = MAIN_X + MAIN_W / 2;
   const arrows = [
     `M ${midMain} ${identifyB.y + identifyB.h} L ${midMain} ${screenedB.y}`,
-    `M ${midMain} ${screenedB.y + screenedB.h} L ${midMain} ${assessedB.y}`,
+    `M ${midMain} ${screenedB.y + screenedB.h} L ${midMain} ${soughtB.y}`,
+    `M ${midMain} ${soughtB.y + soughtB.h} L ${midMain} ${assessedB.y}`,
     `M ${midMain} ${assessedB.y + assessedB.h} L ${midMain} ${includedB.y}`,
     `M ${MAIN_X + MAIN_W} ${dupB.y + dupB.h / 2} L ${SIDE_X} ${dupB.y + dupB.h / 2}`,
     `M ${MAIN_X + MAIN_W} ${taExcB.y + taExcB.h / 2} L ${SIDE_X} ${taExcB.y + taExcB.h / 2}`,
+    `M ${MAIN_X + MAIN_W} ${notRetB.y + notRetB.h / 2} L ${SIDE_X} ${notRetB.y + notRetB.h / 2}`,
     `M ${MAIN_X + MAIN_W} ${ftExcB.y + ftExcB.h / 2} L ${SIDE_X} ${ftExcB.y + ftExcB.h / 2}`,
   ];
 
   return {
-    boxes: [identifyB, dupB, screenedB, taExcB, assessedB, ftExcB, includedB],
+    boxes: [
+      identifyB,
+      dupB,
+      screenedB,
+      taExcB,
+      soughtB,
+      notRetB,
+      assessedB,
+      ftExcB,
+      includedB,
+    ],
     arrows,
     width: 740,
     height,

@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
+import { outcomeOf } from "@/lib/outcomes";
 import {
   collectDependents,
   repairDependents,
   repairSummary,
 } from "@/lib/rededupe";
+import type { Decision, Stage } from "@/lib/types";
 import type {
   ExclusionReason,
   ImportBatch,
@@ -46,7 +48,10 @@ export default function RecordsClient({
   userId: string;
 }) {
   const [rows, setRows] = useState<RecordRow[] | null>(null);
-  const [decisions, setDecisions] = useState<Map<string, ScreeningDecision[]>>(
+  const [taDecs, setTaDecs] = useState<Map<string, ScreeningDecision[]>>(
+    new Map()
+  );
+  const [ftDecs, setFtDecs] = useState<Map<string, ScreeningDecision[]>>(
     new Map()
   );
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
@@ -163,29 +168,31 @@ export default function RecordsClient({
     setTotal(count ?? 0);
 
     const ids = records.map((r) => r.id);
-    const map = new Map<string, ScreeningDecision[]>();
+    const ta = new Map<string, ScreeningDecision[]>();
+    const ft = new Map<string, ScreeningDecision[]>();
     if (ids.length > 0) {
       const { data: dec } = await supabase
         .from("screening_decisions")
         .select("*")
-        .in("record_id", ids)
-        .eq("stage", "title_abstract");
+        .in("record_id", ids);
       ((dec ?? []) as ScreeningDecision[]).forEach((d) => {
+        const map = d.stage === "full_text" ? ft : ta;
         const list = map.get(d.record_id) ?? [];
         list.push(d);
         map.set(d.record_id, list);
       });
     }
-    setDecisions(map);
+    setTaDecs(ta);
+    setFtDecs(ft);
 
     if (decisionFilter === "all") {
       setRows(records);
     } else if (decisionFilter === "undecided") {
-      setRows(records.filter((r) => !(map.get(r.id)?.length ?? 0)));
+      setRows(records.filter((r) => !(ta.get(r.id)?.length ?? 0)));
     } else {
       setRows(
         records.filter((r) =>
-          (map.get(r.id) ?? []).some((d) => d.decision === decisionFilter)
+          (ta.get(r.id) ?? []).some((d) => d.decision === decisionFilter)
         )
       );
     }
@@ -318,6 +325,62 @@ export default function RecordsClient({
     load();
   }
 
+  async function setMyDecision(
+    r: RecordRow,
+    stage: Stage,
+    decision: Decision,
+    reasonId: string | null
+  ) {
+    const supabase = createClient();
+    const { error: upErr } = await supabase.from("screening_decisions").upsert(
+      {
+        project_id: projectId,
+        record_id: r.id,
+        stage,
+        decision,
+        reason_id: reasonId,
+        decided_by: userId,
+      },
+      { onConflict: "record_id,stage,decided_by" }
+    );
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    load();
+  }
+
+  async function clearMyDecision(r: RecordRow, stage: Stage) {
+    const supabase = createClient();
+    const { error: delErr } = await supabase
+      .from("screening_decisions")
+      .delete()
+      .eq("record_id", r.id)
+      .eq("stage", stage)
+      .eq("decided_by", userId);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    load();
+  }
+
+  async function toggleRetrieval(r: RecordRow) {
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({
+        retrieval_status:
+          r.retrieval_status === "not_retrieved" ? null : "not_retrieved",
+      })
+      .eq("id", r.id);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    load();
+  }
+
   async function toggleDuplicate(r: RecordRow) {
     const supabase = createClient();
     const { error: upErr } = await supabase
@@ -355,6 +418,61 @@ export default function RecordsClient({
     return rc
       ? { text: `exclude: ${rc.code}`, tip: rc.label }
       : { text: "exclude", tip: "Excluded without a specific reason" };
+  };
+
+  const decisionRow = (r: RecordRow, stage: Stage) => {
+    const map = stage === "full_text" ? ftDecs : taDecs;
+    const mine = (map.get(r.id) ?? []).find((d) => d.decided_by === userId);
+    const isInc = mine?.decision === "include";
+    const isExc = mine?.decision === "exclude";
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-24 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          {stage === "full_text" ? "Full text:" : "Title/abstract:"}
+        </span>
+        <button
+          onClick={() => setMyDecision(r, stage, "include", null)}
+          className={`rounded-full px-3 py-1 text-xs transition-colors ${
+            isInc
+              ? "bg-emerald-600 text-white"
+              : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          }`}
+        >
+          Include
+        </button>
+        <select
+          value={isExc ? (mine?.reason_id ?? "__none") : "__unset"}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__unset") return;
+            setMyDecision(r, stage, "exclude", v === "__none" ? null : v);
+          }}
+          className={`h-7 rounded-full border px-2 text-xs ${
+            isExc
+              ? "border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+              : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+          }`}
+        >
+          <option value="__unset">Exclude with reason...</option>
+          {stage !== "full_text" && (
+            <option value="__none">Exclude, no reason</option>
+          )}
+          {reasons.map((re, i) => (
+            <option key={re.id} value={re.id}>
+              E{i + 1}: {re.label}
+            </option>
+          ))}
+        </select>
+        {mine && (
+          <button
+            onClick={() => clearMyDecision(r, stage)}
+            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            Clear (back to undecided)
+          </button>
+        )}
+      </div>
+    );
   };
 
   const selectCls =
@@ -475,7 +593,7 @@ export default function RecordsClient({
           </p>
         ) : (
           rows.map((r) => {
-            const decs = decisions.get(r.id) ?? [];
+            const decs = taDecs.get(r.id) ?? [];
             const mine = decs.find((d) => d.decided_by === userId);
             const isOpen = expanded === r.id;
             const isEditing = editingId === r.id && form !== null;
@@ -509,6 +627,11 @@ export default function RecordsClient({
                   {r.status === "duplicate" && (
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                       duplicate
+                    </span>
+                  )}
+                  {r.retrieval_status === "not_retrieved" && (
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                      no access
                     </span>
                   )}
                   {mine && (
@@ -549,6 +672,24 @@ export default function RecordsClient({
                           })
                           .join(", ")}
                       </p>
+                    )}
+                    {r.status === "active" && (
+                      <div className="mb-3 flex flex-col gap-2 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-950">
+                        {decisionRow(r, "title_abstract")}
+                        {outcomeOf(taDecs.get(r.id) ?? []) === "included" && (
+                          <>
+                            {decisionRow(r, "full_text")}
+                            <button
+                              onClick={() => toggleRetrieval(r)}
+                              className="self-start text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                            >
+                              {r.retrieval_status === "not_retrieved"
+                                ? "Marked as full text not retrievable · undo"
+                                : "Mark full text not retrievable"}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
                     <div className="flex gap-4">
                       <button
