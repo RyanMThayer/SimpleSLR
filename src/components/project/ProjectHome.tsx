@@ -400,6 +400,12 @@ export default function ProjectHome({
             Backward and forward citation search
           </p>
         </Link>
+        <Link href={`/projects/${project.id}/concepts`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Concepts</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Webster and Watson concept matrix
+          </p>
+        </Link>
         <Link href={`/projects/${project.id}/prisma`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
             PRISMA and exports

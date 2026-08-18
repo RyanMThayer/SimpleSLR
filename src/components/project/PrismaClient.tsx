@@ -406,8 +406,25 @@ export default function PrismaClient({ project }: { project: Project }) {
   const stamp = new Date().toISOString().slice(0, 10);
   const base = `${slugify(project.name)}-${stamp}`;
 
-  function exportBackup() {
+  async function exportBackup() {
     if (!data) return;
+    // Concept matrix tables are fetched on demand; before migration 0009
+    // they do not exist and the backup simply omits them.
+    const supabase = createClient();
+    const fetchAll = async (table: string) => {
+      try {
+        return await fetchPaged<Record<string, unknown>>((f, t) =>
+          supabase.from(table).select("*").eq("project_id", project.id).range(f, t)
+        );
+      } catch {
+        return [];
+      }
+    };
+    const [concepts, conceptTags, conceptExcerpts] = await Promise.all([
+      fetchAll("concepts"),
+      fetchAll("concept_tags"),
+      fetchAll("concept_excerpts"),
+    ]);
     downloadFile(
       `${base}-backup.json`,
       JSON.stringify(
@@ -420,6 +437,9 @@ export default function PrismaClient({ project }: { project: Project }) {
           decisions: data.decisions,
           reasons: data.reasons,
           members: [...data.profiles.values()],
+          concepts,
+          concept_tags: conceptTags,
+          concept_excerpts: conceptExcerpts,
         },
         null,
         2

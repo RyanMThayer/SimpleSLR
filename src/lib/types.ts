@@ -137,6 +137,40 @@ export type ScreeningDecision = {
   decided_at: string;
 };
 
+export type Concept = {
+  id: string;
+  project_id: string;
+  label: string;
+  description: string | null;
+  position: number;
+  created_by: string | null;
+  created_at: string;
+};
+
+/** Paper-by-concept membership; the cells of the concept matrix. */
+export type ConceptTag = {
+  id: string;
+  project_id: string;
+  concept_id: string;
+  record_id: string;
+  unit: string | null;
+  note: string | null;
+  tagged_by: string | null;
+  created_at: string;
+};
+
+/** A pasted evidence passage backing one tag. */
+export type ConceptExcerpt = {
+  id: string;
+  project_id: string;
+  concept_id: string;
+  record_id: string;
+  quote: string;
+  page: number | null;
+  added_by: string | null;
+  created_at: string;
+};
+
 /** A reference parsed from an uploaded file, before insertion. */
 export type ParsedRef = {
   title: string;
