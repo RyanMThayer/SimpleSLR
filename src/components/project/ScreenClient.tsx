@@ -108,13 +108,14 @@ export default function ScreenClient({
   userId: string;
 }) {
   const [queue, setQueue] = useState<RecordRow[] | null>(null);
+  const [idx, setIdx] = useState(0);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
   const [mineTotal, setMineTotal] = useState(0);
   const [mineDone, setMineDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
-  const undoStack = useRef<RecordRow[]>([]);
+  const undoStack = useRef<{ rec: RecordRow; at: number }[]>([]);
 
   // Criteria panel
   const [criteriaOpen, setCriteriaOpen] = useState(true);
@@ -203,6 +204,7 @@ export default function ScreenClient({
     }
     setError(null);
     setQueue(remaining);
+    setIdx(0);
   }, [project.id, userId]);
 
   useEffect(() => {
@@ -211,11 +213,22 @@ export default function ScreenClient({
     load();
   }, [load]);
 
-  const current = queue?.[0] ?? null;
+  const current =
+    queue && queue.length > 0 ? queue[Math.min(idx, queue.length - 1)] : null;
+
+  const goNext = useCallback(() => {
+    if (!queue || queue.length < 2) return;
+    setIdx((i) => (i + 1) % queue.length);
+  }, [queue]);
+
+  const goPrev = useCallback(() => {
+    if (!queue || queue.length < 2) return;
+    setIdx((i) => (i - 1 + queue.length) % queue.length);
+  }, [queue]);
 
   const decide = useCallback(
     async (decision: Decision, reasonId: string | null = null) => {
-      if (!current || saving) return;
+      if (!current || !queue || saving) return;
       setSaving(true);
       const supabase = createClient();
       const { error: insErr } = await supabase.from("screening_decisions").upsert(
@@ -234,15 +247,17 @@ export default function ScreenClient({
         setError(insErr.message);
         return;
       }
-      undoStack.current.push(current);
+      const at = Math.min(idx, queue.length - 1);
+      undoStack.current.push({ rec: current, at });
       setCanUndo(true);
-      const willBeEmpty = (queue?.length ?? 0) <= 1;
-      setQueue((q) => (q ? q.slice(1) : q));
+      const nq = [...queue.slice(0, at), ...queue.slice(at + 1)];
+      setQueue(nq);
+      setIdx(at >= nq.length ? 0 : at);
       setMineDone((d) => d + 1);
       // The queue loads in pages; when a page is exhausted, fetch the next.
-      if (willBeEmpty) load();
+      if (nq.length === 0) load();
     },
-    [current, saving, project.id, userId, queue, load]
+    [current, saving, project.id, userId, queue, idx, load]
   );
 
   const undo = useCallback(async () => {
@@ -252,17 +267,21 @@ export default function ScreenClient({
     const { error: delErr } = await supabase
       .from("screening_decisions")
       .delete()
-      .eq("record_id", last.id)
+      .eq("record_id", last.rec.id)
       .eq("stage", STAGE)
       .eq("decided_by", userId);
     if (delErr) {
       setError(delErr.message);
       return;
     }
-    setQueue((q) => (q ? [last, ...q] : [last]));
+    const arr = queue ? [...queue] : [];
+    const pos = Math.min(last.at, arr.length);
+    arr.splice(pos, 0, last.rec);
+    setQueue(arr);
+    setIdx(pos);
     setMineDone((d) => Math.max(0, d - 1));
     setCanUndo(undoStack.current.length > 0);
-  }, [userId]);
+  }, [userId, queue]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -273,24 +292,28 @@ export default function ScreenClient({
 
       const k = e.key.toLowerCase();
       if (/^[1-9]$/.test(e.key)) {
-        const idx = parseInt(e.key, 10) - 1;
-        if (idx < reasons.length) {
-          decide("exclude", reasons[idx].id);
+        const ri = parseInt(e.key, 10) - 1;
+        if (ri < reasons.length) {
+          decide("exclude", reasons[ri].id);
           e.preventDefault();
         }
+      } else if (e.key === "ArrowRight") {
+        goNext();
+        e.preventDefault();
+      } else if (e.key === "ArrowLeft") {
+        goPrev();
+        e.preventDefault();
       } else if (k === "i") {
         decide("include");
       } else if (k === "e") {
         decide("exclude");
-      } else if (k === "m") {
-        decide("maybe");
       } else if (k === "u") {
         undo();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, decide, undo, editConfirm]);
+  }, [reasons, decide, undo, goNext, goPrev, editConfirm]);
 
   // ----- criteria editing -----
 
@@ -434,7 +457,10 @@ export default function ScreenClient({
             Title and abstract screening · {mineDone} / {mineTotal} done ({pct}%)
           </span>
           <span className="hidden lg:inline">
-            Keys: 1-9 exclude with reason · I include · M maybe · E exclude · U undo
+            Keys: 1-9 exclude with reason · I include · E exclude · ←/→ skip · U undo
+            {queue && queue.length > 1 && (
+              <> · viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length} undecided</>
+            )}
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
@@ -546,11 +572,12 @@ export default function ScreenClient({
                   Include (I)
                 </button>
                 <button
-                  onClick={() => decide("maybe")}
-                  disabled={saving}
+                  onClick={goNext}
+                  disabled={saving || (queue?.length ?? 0) < 2}
                   className={`${btn} bg-amber-500 text-white hover:bg-amber-400`}
+                  title="Leave undecided and look at the next record; it stays in the queue"
                 >
-                  Maybe (M)
+                  Skip (→)
                 </button>
                 <button
                   onClick={() => decide("exclude")}
@@ -774,7 +801,10 @@ export default function ScreenClient({
             <p className="mb-1 font-semibold text-zinc-700 dark:text-zinc-300">
               Other keys
             </p>
-            <p>I include · M maybe · E exclude without reason · U undo</p>
+            <p>
+              I include · E exclude without reason · ← → skip through
+              undecided · U undo
+            </p>
           </div>
         </aside>
       </div>

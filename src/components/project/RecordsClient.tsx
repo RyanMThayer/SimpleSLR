@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
-import type { ImportBatch, RecordRow, ScreeningDecision } from "@/lib/types";
+import type {
+  ExclusionReason,
+  ImportBatch,
+  RecordRow,
+  ScreeningDecision,
+} from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | "active" | "duplicate";
-type DecisionFilter = "all" | "include" | "exclude" | "maybe" | "undecided";
+type DecisionFilter = "all" | "include" | "exclude" | "undecided";
 
 type SourceSummary = {
   key: string; // database id, or "unlinked"
@@ -40,6 +45,7 @@ export default function RecordsClient({
     new Map()
   );
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
+  const [reasons, setReasons] = useState<ExclusionReason[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -54,7 +60,7 @@ export default function RecordsClient({
 
   const loadSources = useCallback(async () => {
     const supabase = createClient();
-    const [dbRes, batchRes] = await Promise.all([
+    const [dbRes, batchRes, reasonRes] = await Promise.all([
       supabase
         .from("project_databases")
         .select("id, name")
@@ -63,9 +69,15 @@ export default function RecordsClient({
         .from("import_batches")
         .select("*")
         .eq("project_id", projectId),
+      supabase
+        .from("exclusion_reasons")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("position"),
     ]);
     const dbs = (dbRes.data ?? []) as { id: string; name: string }[];
     const allBatches = (batchRes.data ?? []) as ImportBatch[];
+    setReasons((reasonRes.data ?? []) as ExclusionReason[]);
 
     const raw: SourceSummary[] = [];
     for (const db of dbs) {
@@ -298,9 +310,21 @@ export default function RecordsClient({
   const badge = (decision: string) =>
     decision === "include"
       ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
-      : decision === "exclude"
-        ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-        : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200";
+      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+
+  // E# codes derived from the live reason list, so they always match the
+  // numbering shown in the screening room (deleted reasons reset their
+  // decisions, so no stale codes can appear).
+  const reasonCode = new Map<string, { code: string; label: string }>(
+    reasons.map((r, i) => [r.id, { code: `E${i + 1}`, label: r.label }])
+  );
+  const decisionText = (d: ScreeningDecision) => {
+    if (d.decision === "include") return { text: "include", tip: "Included" };
+    const rc = d.reason_id ? reasonCode.get(d.reason_id) : null;
+    return rc
+      ? { text: `exclude: ${rc.code}`, tip: rc.label }
+      : { text: "exclude", tip: "Excluded without a specific reason" };
+  };
 
   const selectCls =
     "h-9 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
@@ -343,7 +367,6 @@ export default function RecordsClient({
           <option value="all">Any decision</option>
           <option value="include">Included</option>
           <option value="exclude">Excluded</option>
-          <option value="maybe">Maybe</option>
           <option value="undecided">Undecided</option>
         </select>
       </div>
@@ -460,8 +483,9 @@ export default function RecordsClient({
                   {mine && (
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs ${badge(mine.decision)}`}
+                      title={decisionText(mine).tip}
                     >
-                      {mine.decision}
+                      {decisionText(mine).text}
                     </span>
                   )}
                   <span className="w-12 shrink-0 text-right text-xs text-zinc-400">
@@ -484,7 +508,14 @@ export default function RecordsClient({
                       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
                         Decisions:{" "}
                         {decs
-                          .map((d) => `${d.decision}${d.decided_by === userId ? " (you)" : ""}`)
+                          .map((d) => {
+                            const dt = decisionText(d);
+                            const reason =
+                              d.decision === "exclude" && d.reason_id
+                                ? ` (${reasonCode.get(d.reason_id)?.label ?? "removed reason"})`
+                                : "";
+                            return `${dt.text}${reason}${d.decided_by === userId ? " (you)" : ""}`;
+                          })
                           .join(", ")}
                       </p>
                     )}

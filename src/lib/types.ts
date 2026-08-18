@@ -116,7 +116,7 @@ export type ExclusionReason = {
 };
 
 export type Stage = "title_abstract" | "full_text";
-export type Decision = "include" | "exclude" | "maybe";
+export type Decision = "include" | "exclude";
 
 export type ScreeningDecision = {
   id: string;
