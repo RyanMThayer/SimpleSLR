@@ -2,12 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import type { RecordRow, ScreeningDecision } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | "active" | "duplicate";
 type DecisionFilter = "all" | "include" | "exclude" | "maybe" | "undecided";
+
+type EditForm = {
+  title: string;
+  authors: string;
+  year: string;
+  venue: string;
+  abstract: string;
+  doi: string;
+  url: string;
+};
 
 export default function RecordsClient({
   projectId,
@@ -27,6 +38,9 @@ export default function RecordsClient({
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<EditForm | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -49,7 +63,6 @@ export default function RecordsClient({
     setError(null);
     setTotal(count ?? 0);
 
-    // Decisions for the visible records.
     const ids = records.map((r) => r.id);
     const map = new Map<string, ScreeningDecision[]>();
     if (ids.length > 0) {
@@ -85,6 +98,82 @@ export default function RecordsClient({
     load();
   }, [load]);
 
+  function startEdit(r: RecordRow) {
+    setEditingId(r.id);
+    setForm({
+      title: r.title,
+      authors: r.authors ?? "",
+      year: r.year?.toString() ?? "",
+      venue: r.venue ?? "",
+      abstract: r.abstract ?? "",
+      doi: r.doi ?? "",
+      url: r.url ?? "",
+    });
+  }
+
+  async function saveEdit(recordId: string) {
+    if (!form || !form.title.trim()) return;
+    setSaving(true);
+    const supabase = createClient();
+    const yearMatch = form.year.match(/\d{4}/);
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({
+        title: form.title.trim(),
+        authors: form.authors.trim() || null,
+        year: yearMatch ? parseInt(yearMatch[0], 10) : null,
+        venue: form.venue.trim() || null,
+        abstract: form.abstract.trim() || null,
+        doi: form.doi.trim() || null,
+        url: form.url.trim() || null,
+        norm_title: normalizeTitle(form.title),
+        norm_doi: normalizeDoi(form.doi.trim() || null),
+      })
+      .eq("id", recordId);
+    setSaving(false);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setEditingId(null);
+    setForm(null);
+    load();
+  }
+
+  async function deleteRecord(r: RecordRow) {
+    const ok = window.confirm(
+      `Delete "${r.title.slice(0, 60)}..."? Screening decisions on it are removed too. This cannot be undone.`
+    );
+    if (!ok) return;
+    const supabase = createClient();
+    const { error: delErr } = await supabase
+      .from("records")
+      .delete()
+      .eq("id", r.id);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    setExpanded(null);
+    load();
+  }
+
+  async function toggleDuplicate(r: RecordRow) {
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({
+        status: r.status === "duplicate" ? "active" : "duplicate",
+        duplicate_of: null,
+      })
+      .eq("id", r.id);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    load();
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const badge = (decision: string) =>
@@ -96,6 +185,9 @@ export default function RecordsClient({
 
   const selectCls =
     "h-9 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+  const inputCls =
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+  const linkBtn = "text-xs underline underline-offset-2";
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
@@ -155,18 +247,27 @@ export default function RecordsClient({
             const decs = decisions.get(r.id) ?? [];
             const mine = decs.find((d) => d.decided_by === userId);
             const isOpen = expanded === r.id;
+            const isEditing = editingId === r.id && form !== null;
             return (
               <div
                 key={r.id}
                 className="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
               >
                 <button
-                  onClick={() => setExpanded(isOpen ? null : r.id)}
+                  onClick={() => {
+                    setExpanded(isOpen ? null : r.id);
+                    setEditingId(null);
+                  }}
                   className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 >
                   <span className="flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
                     {r.title}
                   </span>
+                  {r.source_label && (
+                    <span className="hidden max-w-32 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 sm:inline dark:bg-zinc-800 dark:text-zinc-400">
+                      {r.source_label}
+                    </span>
+                  )}
                   {r.status === "duplicate" && (
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                       duplicate
@@ -183,10 +284,12 @@ export default function RecordsClient({
                     {r.year ?? ""}
                   </span>
                 </button>
-                {isOpen && (
+
+                {isOpen && !isEditing && (
                   <div className="px-5 pb-4 text-sm">
                     <p className="mb-1 text-zinc-500 dark:text-zinc-400">
                       {[r.authors, r.venue, r.source_label].filter(Boolean).join(" · ")}
+                      {r.doi && <> · DOI: {r.doi}</>}
                     </p>
                     {r.abstract && (
                       <p className="mb-2 leading-6 text-zinc-700 dark:text-zinc-300">
@@ -194,13 +297,100 @@ export default function RecordsClient({
                       </p>
                     )}
                     {decs.length > 0 && (
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
                         Decisions:{" "}
                         {decs
                           .map((d) => `${d.decision}${d.decided_by === userId ? " (you)" : ""}`)
                           .join(", ")}
                       </p>
                     )}
+                    <div className="flex gap-4">
+                      <button
+                        onClick={() => startEdit(r)}
+                        className={`${linkBtn} text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => toggleDuplicate(r)}
+                        className={`${linkBtn} text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200`}
+                      >
+                        {r.status === "duplicate" ? "Mark as unique" : "Mark as duplicate"}
+                      </button>
+                      <button
+                        onClick={() => deleteRecord(r)}
+                        className={`${linkBtn} text-zinc-400 hover:text-red-600`}
+                      >
+                        Delete record
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isOpen && isEditing && form && (
+                  <div className="flex flex-col gap-2 px-5 pb-4 text-sm">
+                    <input
+                      className={inputCls}
+                      value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      placeholder="Title"
+                    />
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <input
+                        className={inputCls}
+                        value={form.authors}
+                        onChange={(e) => setForm({ ...form, authors: e.target.value })}
+                        placeholder="Authors"
+                      />
+                      <input
+                        className={inputCls}
+                        value={form.venue}
+                        onChange={(e) => setForm({ ...form, venue: e.target.value })}
+                        placeholder="Venue"
+                      />
+                      <input
+                        className={inputCls}
+                        value={form.year}
+                        onChange={(e) => setForm({ ...form, year: e.target.value })}
+                        placeholder="Year"
+                      />
+                      <input
+                        className={inputCls}
+                        value={form.doi}
+                        onChange={(e) => setForm({ ...form, doi: e.target.value })}
+                        placeholder="DOI"
+                      />
+                    </div>
+                    <input
+                      className={inputCls}
+                      value={form.url}
+                      onChange={(e) => setForm({ ...form, url: e.target.value })}
+                      placeholder="URL"
+                    />
+                    <textarea
+                      className={`${inputCls} min-h-24`}
+                      value={form.abstract}
+                      onChange={(e) => setForm({ ...form, abstract: e.target.value })}
+                      placeholder="Abstract"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => saveEdit(r.id)}
+                        disabled={saving || !form.title.trim()}
+                        className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-zinc-50 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+                      >
+                        {saving ? "Saving..." : "Save changes"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingId(null);
+                          setForm(null);
+                        }}
+                        className={`${linkBtn} text-zinc-400`}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

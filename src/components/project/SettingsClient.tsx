@@ -6,7 +6,6 @@ import type { ExclusionReason, Project } from "@/lib/types";
 
 export default function SettingsClient({ project }: { project: Project }) {
   const [name, setName] = useState(project.name);
-  const [question, setQuestion] = useState(project.research_question ?? "");
   const [inclusion, setInclusion] = useState(project.inclusion_criteria ?? "");
   const [exclusion, setExclusion] = useState(project.exclusion_criteria ?? "");
   const [includeKw, setIncludeKw] = useState(project.include_keywords.join(", "));
@@ -45,7 +44,6 @@ export default function SettingsClient({ project }: { project: Project }) {
       .from("projects")
       .update({
         name: name.trim() || project.name,
-        research_question: question.trim() || null,
         inclusion_criteria: inclusion.trim() || null,
         exclusion_criteria: exclusion.trim() || null,
         include_keywords: parseKeywords(includeKw),
@@ -110,14 +108,11 @@ export default function SettingsClient({ project }: { project: Project }) {
           Name
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className={labelCls}>
-          Research question
-          <textarea
-            className={`${inputCls} min-h-20`}
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        </label>
+        <p className="text-xs text-zinc-400">
+          The research objective and questions live on the project page; the
+          search string and search limits live on the Discovery page. Below are
+          the screening criteria and tools.
+        </p>
         <label className={labelCls}>
           Inclusion criteria
           <textarea

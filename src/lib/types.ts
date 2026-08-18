@@ -1,12 +1,71 @@
+export type SearchFields = {
+  title: boolean;
+  abstract: boolean;
+  keywords: boolean;
+};
+
+export type SearchGroup = {
+  /** Terms OR'd together inside this concept group. */
+  terms: string[];
+};
+
+export type SearchLimits = {
+  languages: string;
+  yearFrom: number | null;
+  yearTo: number | null;
+  pubTypes: string;
+  notes: string;
+};
+
+export type SearchConfig = {
+  groups: SearchGroup[];
+  fields: SearchFields;
+  limits: SearchLimits;
+};
+
+export const EMPTY_SEARCH_CONFIG: SearchConfig = {
+  groups: [{ terms: [] }],
+  fields: { title: true, abstract: true, keywords: true },
+  limits: { languages: "", yearFrom: null, yearTo: null, pubTypes: "", notes: "" },
+};
+
+export type DatabaseKind = "scopus" | "wos" | "ieee" | "pubmed" | "custom";
+
+export type ProjectDatabase = {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: DatabaseKind;
+  enabled: boolean;
+  raw_hit_count: number | null;
+  searched_on: string | null;
+  notes: string | null;
+  position: number;
+  created_at: string;
+};
+
+export type ImportBatch = {
+  id: string;
+  project_id: string;
+  filename: string | null;
+  source_label: string | null;
+  record_count: number;
+  imported_by: string | null;
+  database_id: string | null;
+  created_at: string;
+};
+
 export type Project = {
   id: string;
   name: string;
+  research_objective: string | null;
   research_question: string | null;
   inclusion_criteria: string | null;
   exclusion_criteria: string | null;
   include_keywords: string[];
   exclude_keywords: string[];
   invite_code: string;
+  search_config: Partial<SearchConfig> | null;
   created_by: string;
   created_at: string;
 };

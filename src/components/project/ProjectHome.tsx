@@ -24,6 +24,10 @@ export default function ProjectHome({
   const [copied, setCopied] = useState(false);
   const [distributing, setDistributing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [editingRq, setEditingRq] = useState(false);
+  const [objective, setObjective] = useState(project.research_objective ?? "");
+  const [questions, setQuestions] = useState(project.research_question ?? "");
+  const [savingRq, setSavingRq] = useState(false);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -135,8 +139,28 @@ export default function ProjectHome({
     load();
   }
 
+  async function saveResearch() {
+    setSavingRq(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("projects")
+      .update({
+        research_objective: objective.trim() || null,
+        research_question: questions.trim() || null,
+      })
+      .eq("id", project.id);
+    setSavingRq(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setEditingRq(false);
+  }
+
   const tile =
     "rounded-xl border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600";
+  const rqInput =
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
@@ -159,11 +183,93 @@ export default function ProjectHome({
         </button>
       </div>
 
+      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+            Research objective and questions
+          </h2>
+          {!editingRq ? (
+            <button
+              onClick={() => setEditingRq(true)}
+              className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
+              Edit
+            </button>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={saveResearch}
+                disabled={savingRq}
+                className="text-xs font-medium text-emerald-600 underline underline-offset-2"
+              >
+                {savingRq ? "Saving..." : "Save"}
+              </button>
+              <button
+                onClick={() => {
+                  setEditingRq(false);
+                  setObjective(project.research_objective ?? "");
+                  setQuestions(project.research_question ?? "");
+                }}
+                className="text-xs text-zinc-400 underline underline-offset-2"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+        {editingRq ? (
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Research objective
+              <textarea
+                className={`${rqInput} min-h-16`}
+                placeholder="What this review sets out to establish"
+                value={objective}
+                onChange={(e) => setObjective(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Research questions (one per line)
+              <textarea
+                className={`${rqInput} min-h-24`}
+                placeholder={"RQ1: ...\nRQ2: ..."}
+                value={questions}
+                onChange={(e) => setQuestions(e.target.value)}
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {objective ? (
+              <p className="text-zinc-800 dark:text-zinc-200">{objective}</p>
+            ) : (
+              <p className="text-sm italic text-zinc-400">
+                No research objective yet. It anchors the search string and the
+                criteria, so add it early.
+              </p>
+            )}
+            {questions ? (
+              <div className="flex flex-col gap-1">
+                {questions.split("\n").filter((l) => l.trim()).map((l, i) => (
+                  <p key={i} className="text-sm text-zinc-700 dark:text-zinc-300">
+                    {l}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm italic text-zinc-400">
+                No research questions yet.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href={`/projects/${project.id}/import`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Import</h2>
+        <Link href={`/projects/${project.id}/discovery`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Discovery</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            RIS or CSV from Scopus, WoS, IEEE
+            Search string, databases, import
           </p>
         </Link>
         <Link href={`/projects/${project.id}/screen`} className={tile}>
@@ -241,16 +347,6 @@ export default function ProjectHome({
         </div>
       </section>
 
-      {project.research_question && (
-        <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-400">
-            Research question
-          </h2>
-          <p className="text-zinc-800 dark:text-zinc-200">
-            {project.research_question}
-          </p>
-        </section>
-      )}
     </main>
   );
 }

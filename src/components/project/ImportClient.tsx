@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { parseRis } from "@/lib/ris";
+import { parseBibtex } from "@/lib/bibtex";
 import { parseCsv, guessMapping, rowsToRefs, type ColumnMapping } from "@/lib/csv";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import type { ParsedRef } from "@/lib/types";
@@ -18,15 +18,25 @@ const FIELD_LABELS: { key: keyof ColumnMapping; label: string }[] = [
   { key: "url", label: "URL" },
 ];
 
+/**
+ * Reusable import panel. When databaseId is set, the created batch and
+ * its records are linked to that database for provenance.
+ */
 export default function ImportClient({
   projectId,
   userId,
+  databaseId = null,
+  sourceLabelDefault = "",
+  onDone,
 }: {
   projectId: string;
   userId: string;
+  databaseId?: string | null;
+  sourceLabelDefault?: string;
+  onDone?: () => void;
 }) {
   const [fileName, setFileName] = useState<string | null>(null);
-  const [sourceLabel, setSourceLabel] = useState("");
+  const [sourceLabel, setSourceLabel] = useState(sourceLabelDefault);
   const [refs, setRefs] = useState<ParsedRef[] | null>(null);
   const [csvRows, setCsvRows] = useState<string[][] | null>(null);
   const [csvHeader, setCsvHeader] = useState<string[] | null>(null);
@@ -52,11 +62,11 @@ export default function ImportClient({
     if (!file) return;
     setFileName(file.name);
     if (!sourceLabel) {
-      const base = file.name.replace(/\.[^.]+$/, "");
-      setSourceLabel(base);
+      setSourceLabel(sourceLabelDefault || file.name.replace(/\.[^.]+$/, ""));
     }
     const text = await file.text();
     const lower = file.name.toLowerCase();
+
     if (lower.endsWith(".csv") || lower.endsWith(".tsv")) {
       const rows = parseCsv(
         lower.endsWith(".tsv") ? text.replace(/\t/g, ",") : text
@@ -78,12 +88,19 @@ export default function ImportClient({
       } else {
         setRefs(rowsToRefs(dataRows, guessed));
       }
+    } else if (lower.endsWith(".bib") || lower.endsWith(".bibtex")) {
+      const parsed = parseBibtex(text);
+      if (parsed.length === 0) {
+        setError("No records found in this BibTeX file.");
+        return;
+      }
+      setRefs(parsed);
     } else {
       // Treat everything else (.ris, .txt) as RIS.
       const parsed = parseRis(text);
       if (parsed.length === 0) {
         setError(
-          "No records found. Expected a RIS file (from Scopus, Web of Science, or IEEE Xplore) or a CSV export."
+          "No records found. Expected a RIS, BibTeX, or CSV export from the database."
         );
         return;
       }
@@ -110,7 +127,6 @@ export default function ImportClient({
     setResult(null);
     const supabase = createClient();
 
-    // Existing dedup keys in this project.
     setProgress("Checking for duplicates...");
     const existingDois = new Set<string>();
     const existingTitles = new Set<string>();
@@ -140,6 +156,7 @@ export default function ImportClient({
         filename: fileName,
         source_label: sourceLabel || null,
         imported_by: userId,
+        database_id: databaseId,
       })
       .select("id")
       .single();
@@ -196,43 +213,35 @@ export default function ImportClient({
     setProgress(null);
     setImporting(false);
     setResult(
-      `Imported ${rows.length} records: ${rows.length - duplicates} new, ${duplicates} automatically marked as duplicates (matching DOI or title).`
+      `Imported ${rows.length} records: ${rows.length - duplicates} new, ${duplicates} marked as duplicates (matching DOI or title).`
     );
     setRefs(null);
     setCsvRows(null);
     setCsvHeader(null);
     setFileName(null);
+    onDone?.();
   }
 
   const withAbstract = refs?.filter((r) => r.abstract).length ?? 0;
   const withDoi = refs?.filter((r) => r.doi).length ?? 0;
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8">
-      <h1 className="mb-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        Import records
-      </h1>
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
-        Upload a RIS or CSV export from Scopus, Web of Science, or IEEE Xplore.
-        Records matching an existing DOI or title are marked as duplicates
-        automatically.
-      </p>
-
-      <div className="mb-4 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Source label (shows up in PRISMA counts later)
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          Source label (used in PRISMA counts)
           <input
             className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-            placeholder="e.g. Scopus search 2026-08-17"
+            placeholder="e.g. Scopus 2026-08-18"
             value={sourceLabel}
             onChange={(e) => setSourceLabel(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          File (.ris, .txt, .csv)
+        <label className="flex flex-1 flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          File (.ris, .bib, .csv, .txt)
           <input
             type="file"
-            accept=".ris,.txt,.csv,.tsv"
+            accept=".ris,.txt,.csv,.tsv,.bib,.bibtex"
             onChange={onFile}
             className="text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-zinc-50 dark:text-zinc-400 dark:file:bg-zinc-50 dark:file:text-zinc-900"
           />
@@ -240,10 +249,10 @@ export default function ImportClient({
       </div>
 
       {csvHeader && mapping && (
-        <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="mb-3 font-semibold text-zinc-900 dark:text-zinc-50">
+        <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
             Column mapping
-          </h2>
+          </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             {FIELD_LABELS.map(({ key, label }) => (
               <label
@@ -270,21 +279,17 @@ export default function ImportClient({
       )}
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
           {error}
         </p>
       )}
 
       {refs && refs.length > 0 && (
-        <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
-            Ready to import: {refs.length} records
-          </h2>
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-            {withAbstract} with abstract · {withDoi} with DOI · first title:{" "}
-            {refs[0].title.slice(0, 80)}
-            {refs[0].title.length > 80 ? "..." : ""}
-          </p>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-sm text-zinc-700 dark:text-zinc-300">
+            <strong>{refs.length}</strong> records parsed · {withAbstract} with
+            abstract · {withDoi} with DOI
+          </span>
           <button
             onClick={runImport}
             disabled={importing}
@@ -296,13 +301,10 @@ export default function ImportClient({
       )}
 
       {result && (
-        <div className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-          {result}{" "}
-          <Link href={`/projects/${projectId}`} className="underline underline-offset-2">
-            Back to the project
-          </Link>
-        </div>
+        <p className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          {result}
+        </p>
       )}
-    </main>
+    </div>
   );
 }
