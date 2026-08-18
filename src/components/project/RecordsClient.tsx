@@ -72,6 +72,10 @@ export default function RecordsClient({
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [snowLinks, setSnowLinks] = useState<
+    Map<string, { seedId: string; direction: string }[]>
+  >(new Map());
+  const [seedTitles, setSeedTitles] = useState<Map<string, string>>(new Map());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -196,6 +200,39 @@ export default function RecordsClient({
     setTaDecs(ta);
     setFtDecs(ft);
 
+    // Snowball provenance for the visible page. The query errors before
+    // migration 0010; the panel then simply shows nothing.
+    const linkMap = new Map<string, { seedId: string; direction: string }[]>();
+    const titleMap = new Map<string, string>();
+    if (ids.length > 0) {
+      const { data: lk } = await supabase
+        .from("snowball_links")
+        .select("record_id, seed_record_id, direction")
+        .in("record_id", ids);
+      const links = (lk ?? []) as {
+        record_id: string;
+        seed_record_id: string;
+        direction: string;
+      }[];
+      links.forEach((l) => {
+        const list = linkMap.get(l.record_id) ?? [];
+        list.push({ seedId: l.seed_record_id, direction: l.direction });
+        linkMap.set(l.record_id, list);
+      });
+      const seedIds = [...new Set(links.map((l) => l.seed_record_id))];
+      for (let i = 0; i < seedIds.length; i += 100) {
+        const { data: seeds } = await supabase
+          .from("records")
+          .select("id, title")
+          .in("id", seedIds.slice(i, i + 100));
+        ((seeds ?? []) as { id: string; title: string }[]).forEach((s) =>
+          titleMap.set(s.id, s.title)
+        );
+      }
+    }
+    setSnowLinks(linkMap);
+    setSeedTitles(titleMap);
+
     if (decisionFilter === "all") {
       setRows(records);
     } else if (decisionFilter === "undecided") {
@@ -311,26 +348,78 @@ export default function RecordsClient({
   }
 
   async function deleteRecord(r: RecordRow) {
+    const supabase = createClient();
     const ok = window.confirm(
       `Delete "${r.title.slice(0, 60)}..."? Screening decisions on it are removed too. This cannot be undone.`
     );
     if (!ok) return;
-    const supabase = createClient();
-    const dependents = await collectDependents(projectId, [r.id]);
-    const { error: delErr } = await supabase
-      .from("records")
-      .delete()
-      .eq("id", r.id);
-    if (delErr) {
-      setError(delErr.message);
-      return;
+
+    // Was this paper a snowball seed? Offer to cascade to papers that
+    // were found only through it. (Query errors before migration 0010;
+    // the cascade offer is then simply skipped.)
+    let alsoDelete: string[] = [];
+    const { data: lk } = await supabase
+      .from("snowball_links")
+      .select("record_id")
+      .eq("seed_record_id", r.id);
+    const childIds = [...new Set((lk ?? []).map((l) => l.record_id))];
+    if (childIds.length > 0) {
+      const viaOthers = new Set<string>();
+      for (let i = 0; i < childIds.length; i += 100) {
+        const { data: allLk } = await supabase
+          .from("snowball_links")
+          .select("record_id, seed_record_id")
+          .in("record_id", childIds.slice(i, i + 100));
+        ((allLk ?? []) as { record_id: string; seed_record_id: string }[]).forEach(
+          (l) => {
+            if (l.seed_record_id !== r.id) viaOthers.add(l.record_id);
+          }
+        );
+      }
+      const exclusive = childIds.filter((id) => !viaOthers.has(id));
+      const shared = childIds.length - exclusive.length;
+      if (exclusive.length > 0) {
+        const cascade = window.confirm(
+          `${childIds.length} snowball record(s) were found through this paper, ${exclusive.length} of them through it alone. Also delete those ${exclusive.length}, with their screening decisions?${
+            shared > 0
+              ? ` The other ${shared} were also found through other seeds and stay either way.`
+              : ""
+          } Cancel keeps all snowball records.`
+        );
+        if (cascade) alsoDelete = exclusive;
+      }
     }
-    if (r.fulltext_path) await removeFulltextPaths([r.fulltext_path]);
+
+    const idsToDelete = [r.id, ...alsoDelete];
+    const dependents = await collectDependents(projectId, idsToDelete);
+    const paths: string[] = r.fulltext_path ? [r.fulltext_path] : [];
+    if (alsoDelete.length > 0) {
+      for (let i = 0; i < alsoDelete.length; i += 100) {
+        const { data: ch } = await supabase
+          .from("records")
+          .select("fulltext_path")
+          .in("id", alsoDelete.slice(i, i + 100));
+        ((ch ?? []) as { fulltext_path: string | null }[]).forEach((c) => {
+          if (c.fulltext_path) paths.push(c.fulltext_path);
+        });
+      }
+    }
+    for (let i = 0; i < idsToDelete.length; i += 100) {
+      const { error: delErr } = await supabase
+        .from("records")
+        .delete()
+        .in("id", idsToDelete.slice(i, i + 100));
+      if (delErr) {
+        setError(delErr.message);
+        return;
+      }
+    }
+    await removeFulltextPaths(paths);
     try {
       const repair = await repairDependents(
         projectId,
         dependents,
-        new Set([r.id])
+        new Set(idsToDelete)
       );
       const note = repairSummary(repair);
       if (note) setError(null);
@@ -730,6 +819,19 @@ export default function RecordsClient({
                       {[r.authors, r.venue, r.source_label].filter(Boolean).join(" · ")}
                       {r.doi && <> · DOI: {r.doi}</>}
                     </p>
+                    {(snowLinks.get(r.id)?.length ?? 0) > 0 && (
+                      <p className="mb-1 text-xs text-violet-700 dark:text-violet-300">
+                        Snowballed{" "}
+                        {(snowLinks.get(r.id) ?? [])
+                          .map(
+                            (l) =>
+                              `${l.direction} from "${(
+                                seedTitles.get(l.seedId) ?? "deleted paper"
+                              ).slice(0, 70)}"`
+                          )
+                          .join("; ")}
+                      </p>
+                    )}
                     {r.abstract && (
                       <p className="mb-2 leading-6 text-zinc-700 dark:text-zinc-300">
                         {r.abstract}

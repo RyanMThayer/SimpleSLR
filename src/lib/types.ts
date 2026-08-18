@@ -137,6 +137,16 @@ export type ScreeningDecision = {
   decided_at: string;
 };
 
+/** Which seed produced which snowball candidate, per direction. */
+export type SnowballLink = {
+  id: string;
+  project_id: string;
+  record_id: string;
+  seed_record_id: string;
+  direction: "backward" | "forward";
+  created_at: string;
+};
+
 export type Concept = {
   id: string;
   project_id: string;

@@ -420,11 +420,13 @@ export default function PrismaClient({ project }: { project: Project }) {
         return [];
       }
     };
-    const [concepts, conceptTags, conceptExcerpts] = await Promise.all([
-      fetchAll("concepts"),
-      fetchAll("concept_tags"),
-      fetchAll("concept_excerpts"),
-    ]);
+    const [concepts, conceptTags, conceptExcerpts, snowballLinks] =
+      await Promise.all([
+        fetchAll("concepts"),
+        fetchAll("concept_tags"),
+        fetchAll("concept_excerpts"),
+        fetchAll("snowball_links"),
+      ]);
     downloadFile(
       `${base}-backup.json`,
       JSON.stringify(
@@ -440,6 +442,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           concepts,
           concept_tags: conceptTags,
           concept_excerpts: conceptExcerpts,
+          snowball_links: snowballLinks,
         },
         null,
         2

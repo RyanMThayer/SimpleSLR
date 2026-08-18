@@ -21,7 +21,7 @@ type Candidate = {
   key: string; // OpenAlex short id
   ref: ParsedRef;
   citedBy: number;
-  sources: { seed: string; dir: Direction }[];
+  sources: { seedId: string; seed: string; dir: Direction }[];
   existing: boolean;
   selected: boolean;
 };
@@ -140,7 +140,7 @@ export default function SnowballClient({
           const key = shortId(w.id);
           if (key === shortId(work.id)) return;
           const entry = map.get(key) ?? { work: w, sources: [] };
-          entry.sources.push({ seed: label, dir });
+          entry.sources.push({ seedId: seed.id, seed: label, dir });
           map.set(key, entry);
         };
         if (dirBack) {
@@ -216,6 +216,7 @@ export default function SnowballClient({
 
     let imported = 0;
     let duplicates = 0;
+    let linksMissing = false;
     for (const dir of ["backward", "forward"] as Direction[]) {
       const group = picked.filter((c) => c.sources[0].dir === dir);
       if (group.length === 0) continue;
@@ -271,13 +272,47 @@ export default function SnowballClient({
         };
       });
       for (let i = 0; i < rows.length; i += 200) {
-        const { error: insErr } = await supabase
+        const { data: inserted, error: insErr } = await supabase
           .from("records")
-          .insert(rows.slice(i, i + 200));
+          .insert(rows.slice(i, i + 200))
+          .select("id");
         if (insErr) {
           setError(insErr.message);
           setImporting(false);
           return;
+        }
+        // Per seed provenance: one link per (paper, seed, direction).
+        const linkRows: {
+          project_id: string;
+          record_id: string;
+          seed_record_id: string;
+          direction: Direction;
+        }[] = [];
+        (inserted ?? []).forEach((row, j) => {
+          const cand = group[i + j];
+          if (!cand) return;
+          const seen = new Set<string>();
+          for (const s of cand.sources) {
+            const k = `${s.seedId}:${s.dir}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            linkRows.push({
+              project_id: projectId,
+              record_id: row.id,
+              seed_record_id: s.seedId,
+              direction: s.dir,
+            });
+          }
+        });
+        if (linkRows.length > 0) {
+          const { error: lkErr } = await supabase
+            .from("snowball_links")
+            .insert(linkRows);
+          if (lkErr && lkErr.message.includes("does not exist")) {
+            linksMissing = true;
+          } else if (lkErr) {
+            setError(lkErr.message);
+          }
         }
       }
       await supabase
@@ -287,7 +322,11 @@ export default function SnowballClient({
     }
     setImporting(false);
     setResult(
-      `Imported ${imported + duplicates} snowball record(s): ${imported} new (now in the screening queue), ${duplicates} marked as duplicates.`
+      `Imported ${imported + duplicates} snowball record(s): ${imported} new, ${duplicates} marked as duplicates. New records join title/abstract screening: distribute them from the project home, or they appear in the unassigned pool once your own assigned queue is done.${
+        linksMissing
+          ? " (Per seed provenance was not recorded: run supabase/migrations/0010_snowball_links.sql.)"
+          : ""
+      }`
     );
     setCandidates(null);
     load();

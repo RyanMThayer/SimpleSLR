@@ -214,13 +214,15 @@ export default function ScreenClient({
       const retrievable = recs.filter(
         (r) => r.retrieval_status !== "not_retrieved"
       );
-      // Full text assignment rule: my ft-assigned records if any exist,
-      // otherwise the unassigned pool.
+      // Full text assignment rule: my undecided ft-assigned records if
+      // any remain, otherwise the unassigned pool (surfaces newly
+      // eligible records before anyone redistributes).
       const mineAssigned = retrievable.filter(
         (r) => r.ft_assigned_to === userId
       );
+      const mineRemaining = mineAssigned.filter((r) => !decided.has(r.id));
       const eligible =
-        mineAssigned.length > 0
+        mineRemaining.length > 0
           ? mineAssigned
           : retrievable.filter((r) => r.ft_assigned_to === null);
       eligible.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -233,15 +235,20 @@ export default function ScreenClient({
       return;
     }
 
-    // Queue mode: records assigned to me if any exist, otherwise the
-    // unassigned pool.
+    // Queue mode: my undecided assigned records if any remain, otherwise
+    // the unassigned pool (this also surfaces fresh imports, such as
+    // snowball records, before anyone redistributes).
     const { count: assignedCount } = await supabase
       .from("records")
       .select("id", { count: "exact", head: true })
       .eq("project_id", project.id)
       .eq("status", "active")
       .eq("assigned_to", userId);
-    const useAssigned = (assignedCount ?? 0) > 0;
+    const remAssigned =
+      (assignedCount ?? 0) > 0
+        ? await remainingAssignedCount(project.id, userId, decided)
+        : 0;
+    const useAssigned = remAssigned > 0;
 
     let query = supabase
       .from("records")
@@ -264,8 +271,7 @@ export default function ScreenClient({
 
     if (useAssigned) {
       setMineTotal(assignedCount ?? 0);
-      const rem = await remainingAssignedCount(project.id, userId, decided);
-      setMineDone(Math.max(0, (assignedCount ?? 0) - rem));
+      setMineDone(Math.max(0, (assignedCount ?? 0) - remAssigned));
     } else {
       const { count: poolCount } = await supabase
         .from("records")
