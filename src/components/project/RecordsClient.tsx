@@ -10,6 +10,7 @@ import {
   signedFulltextUrl,
   uploadFulltext,
 } from "@/lib/fulltext";
+import BulkPdfUpload from "@/components/project/BulkPdfUpload";
 import { useRef } from "react";
 import {
   collectDependents,
@@ -646,6 +647,14 @@ export default function RecordsClient({
           {error}
         </p>
       )}
+
+      <BulkPdfUpload
+        projectId={projectId}
+        onDone={() => {
+          loadSources();
+          load();
+        }}
+      />
 
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         {rows === null ? (
