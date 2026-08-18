@@ -5,7 +5,12 @@ import { createClient } from "@/lib/supabase/client";
 import { parseRis } from "@/lib/ris";
 import { parseBibtex } from "@/lib/bibtex";
 import { parseCsv, guessMapping, rowsToRefs, type ColumnMapping } from "@/lib/csv";
-import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
+import {
+  normalizeTitle,
+  normalizeDoi,
+  authorTokens,
+  sharesAuthor,
+} from "@/lib/normalize";
 import type { ParsedRef } from "@/lib/types";
 
 const FIELD_LABELS: { key: keyof ColumnMapping; label: string }[] = [
@@ -129,12 +134,29 @@ export default function ImportClient({
 
     setProgress("Checking for duplicates...");
     const existingDois = new Set<string>();
-    const existingTitles = new Set<string>();
+    // Title matches need corroboration (shared author, or matching year
+    // when authors are missing), so keep authors and year per title.
+    type TitleInfo = { tokens: Set<string>; year: number | null };
+    const existingTitles = new Map<string, TitleInfo[]>();
+    const addTitle = (title: string, info: TitleInfo) => {
+      const list = existingTitles.get(title);
+      if (list) list.push(info);
+      else existingTitles.set(title, [info]);
+    };
+    const corroborated = (title: string, info: TitleInfo): boolean => {
+      const candidates = existingTitles.get(title);
+      if (!candidates) return false;
+      return candidates.some((c) =>
+        c.tokens.size > 0 && info.tokens.size > 0
+          ? sharesAuthor(c.tokens, info.tokens)
+          : c.year !== null && info.year !== null && c.year === info.year
+      );
+    };
     const pageSize = 1000;
     for (let from = 0; ; from += pageSize) {
       const { data, error: exErr } = await supabase
         .from("records")
-        .select("norm_doi, norm_title")
+        .select("norm_doi, norm_title, authors, year")
         .eq("project_id", projectId)
         .range(from, from + pageSize - 1);
       if (exErr) {
@@ -144,7 +166,12 @@ export default function ImportClient({
       }
       (data ?? []).forEach((r) => {
         if (r.norm_doi) existingDois.add(r.norm_doi);
-        if (r.norm_title) existingTitles.add(r.norm_title);
+        if (r.norm_title) {
+          addTitle(r.norm_title, {
+            tokens: authorTokens(r.authors),
+            year: r.year,
+          });
+        }
       });
       if (!data || data.length < pageSize) break;
     }
@@ -167,14 +194,19 @@ export default function ImportClient({
     }
 
     let duplicates = 0;
+    let uncorroborated = 0;
     const rows = refs.map((r) => {
       const norm_doi = normalizeDoi(r.doi);
       const norm_title = normalizeTitle(r.title);
-      const isDup =
-        (norm_doi !== null && existingDois.has(norm_doi)) ||
-        (norm_title !== "" && existingTitles.has(norm_title));
+      const info = { tokens: authorTokens(r.authors), year: r.year };
+      const doiDup = norm_doi !== null && existingDois.has(norm_doi);
+      const titleMatched =
+        norm_title !== "" && existingTitles.has(norm_title);
+      const titleDup = titleMatched && corroborated(norm_title, info);
+      const isDup = doiDup || titleDup;
+      if (!isDup && titleMatched) uncorroborated++;
       if (norm_doi) existingDois.add(norm_doi);
-      if (norm_title) existingTitles.add(norm_title);
+      if (norm_title) addTitle(norm_title, info);
       if (isDup) duplicates++;
       return {
         project_id: projectId,
@@ -213,7 +245,10 @@ export default function ImportClient({
     setProgress(null);
     setImporting(false);
     setResult(
-      `Imported ${rows.length} records: ${rows.length - duplicates} new, ${duplicates} marked as duplicates (matching DOI or title).`
+      `Imported ${rows.length} records: ${rows.length - duplicates} new, ${duplicates} marked as duplicates (matching DOI, or matching title confirmed by a shared author or year).` +
+        (uncorroborated > 0
+          ? ` ${uncorroborated} title match(es) had no author or year confirmation and were kept as unique; check them in the records table if that seems off.`
+          : "")
     );
     setRefs(null);
     setCsvRows(null);
