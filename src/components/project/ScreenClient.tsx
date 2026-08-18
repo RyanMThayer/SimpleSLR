@@ -109,11 +109,13 @@ type EditConfirm = {
 export default function ScreenClient({
   project,
   userId,
+  initialStage = "title_abstract",
 }: {
   project: Project;
   userId: string;
+  initialStage?: Stage;
 }) {
-  const [stage, setStage] = useState<Stage>("title_abstract");
+  const [stage, setStage] = useState<Stage>(initialStage);
   const [queue, setQueue] = useState<RecordRow[] | null>(null);
   const [idx, setIdx] = useState(0);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
@@ -786,7 +788,7 @@ export default function ScreenClient({
                 {stage === "full_text" &&
                   (pdfUrl ? (
                     <iframe
-                      src={`${pdfUrl}#view=FitH`}
+                      src={`${pdfUrl}#view=FitH&navpanes=0`}
                       title="Full text PDF"
                       className="mt-3 h-[78vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"
                     />

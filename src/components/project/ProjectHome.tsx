@@ -501,7 +501,7 @@ export default function ProjectHome({
               return (
                 <Link
                   key={m.user_id}
-                  href={`/projects/${project.id}/screen`}
+                  href={`/projects/${project.id}/screen?stage=full_text`}
                   title="Open the screening room (Full text tab)"
                   className="flex items-center gap-4 border-b border-zinc-100 px-5 py-3 transition-colors last:border-b-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50"
                 >
