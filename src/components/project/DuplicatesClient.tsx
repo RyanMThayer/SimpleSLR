@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { plausibleAbstract } from "@/lib/abstracts";
+import { fulltextPathFor } from "@/lib/fulltext";
+import { normalizeDoi } from "@/lib/normalize";
 import type { RecordRow } from "@/lib/types";
 
 type Pair = {
@@ -20,6 +23,7 @@ export default function DuplicatesClient({
 }) {
   const [pairs, setPairs] = useState<Pair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -71,18 +75,82 @@ export default function DuplicatesClient({
     load();
   }, [load]);
 
-  async function markDuplicate(dup: RecordRow, original: RecordRow) {
+  /**
+   * Keep `keeper`, retire `dup` as its duplicate. Before retiring,
+   * copy anything the duplicate knows that the keeper is missing:
+   * DOI, a plausible abstract, authors, year, venue, link, and the
+   * stored PDF. The keeper's own values are never overwritten, and
+   * the duplicate stays inspectable under Records with the duplicate
+   * status filter.
+   */
+  async function markDuplicate(dup: RecordRow, keeper: RecordRow) {
     setBusy(true);
+    setNotice(null);
     const supabase = createClient();
+
+    const patch: Record<string, unknown> = {};
+    const merged: string[] = [];
+    if (!keeper.doi?.trim() && dup.doi?.trim()) {
+      patch.doi = dup.doi;
+      patch.norm_doi = dup.norm_doi ?? normalizeDoi(dup.doi);
+      merged.push("DOI");
+    }
+    if (!plausibleAbstract(keeper.abstract) && plausibleAbstract(dup.abstract)) {
+      patch.abstract = dup.abstract;
+      merged.push("abstract");
+    }
+    if (!keeper.authors?.trim() && dup.authors?.trim()) {
+      patch.authors = dup.authors;
+      merged.push("authors");
+    }
+    if (keeper.year == null && dup.year != null) {
+      patch.year = dup.year;
+      merged.push("year");
+    }
+    if (!keeper.venue?.trim() && dup.venue?.trim()) {
+      patch.venue = dup.venue;
+      merged.push("venue");
+    }
+    if (!keeper.url?.trim() && dup.url?.trim()) {
+      patch.url = dup.url;
+      merged.push("link");
+    }
+    if (!keeper.fulltext_path && dup.fulltext_path) {
+      const dest = fulltextPathFor(projectId, keeper.id);
+      const { error: cpErr } = await supabase.storage
+        .from("fulltexts")
+        .copy(dup.fulltext_path, dest);
+      if (!cpErr) {
+        patch.fulltext_path = dest;
+        merged.push("PDF");
+      }
+    }
+
+    if (Object.keys(patch).length > 0) {
+      const { error: kErr } = await supabase
+        .from("records")
+        .update(patch)
+        .eq("id", keeper.id);
+      if (kErr) {
+        setError(kErr.message);
+        setBusy(false);
+        return;
+      }
+    }
     const { error: upErr } = await supabase
       .from("records")
-      .update({ status: "duplicate", duplicate_of: original.id })
+      .update({ status: "duplicate", duplicate_of: keeper.id })
       .eq("id", dup.id);
     setBusy(false);
     if (upErr) {
       setError(upErr.message);
       return;
     }
+    setNotice(
+      merged.length > 0
+        ? `Kept "${keeper.title.slice(0, 60)}" and copied ${merged.join(", ")} over from the duplicate.`
+        : `Kept "${keeper.title.slice(0, 60)}"; the other record is retired as its duplicate.`
+    );
     load();
   }
 
@@ -104,12 +172,20 @@ export default function DuplicatesClient({
     setPairs((ps) => ps?.filter((p) => p !== pair) ?? ps);
   }
 
-  const recCard = (r: RecordRow, showFull: boolean) => (
-    <div className="flex-1 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-700">
+  const recCard = (r: RecordRow, other: RecordRow, showFull: boolean) => (
+    <div className="flex flex-1 flex-col rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-700">
       <p className="mb-1 font-medium text-zinc-900 dark:text-zinc-50">{r.title}</p>
       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
         {[r.authors, r.year, r.venue, r.source_label].filter(Boolean).join(" · ")}
         {r.doi && <> · {r.doi}</>}
+        {r.fulltext_path && (
+          <>
+            {" · "}
+            <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+              PDF
+            </span>
+          </>
+        )}
       </p>
       {r.abstract ? (
         <p
@@ -124,6 +200,16 @@ export default function DuplicatesClient({
           No abstract in the export.
         </p>
       )}
+      <div className="mt-auto pt-3">
+        <button
+          onClick={() => markDuplicate(other, r)}
+          disabled={busy}
+          title="Keeps this record active; the other one becomes its duplicate. Missing details (DOI, abstract, PDF...) are copied over first."
+          className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        >
+          Keep this one
+        </button>
+      </div>
     </div>
   );
 
@@ -147,13 +233,22 @@ export default function DuplicatesClient({
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Possible duplicates
       </h1>
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-300">
         Near matches by title similarity that the automatic import dedup was
-        not confident enough to merge. Marking a record as the duplicate keeps
-        the other one active; dismissing a pair removes it from this list for
-        the whole team.
+        not confident enough to merge. Pick which record to keep: anything the
+        other one knows that the kept record is missing (DOI, abstract,
+        authors, year, venue, link, stored PDF) is copied over first, the
+        kept record&apos;s own values are never overwritten, and the retired
+        duplicate stays inspectable under Records. Screening continues on the
+        kept record. Dismissing a pair removes it from this list for the
+        whole team.
       </p>
 
+      {notice && (
+        <p className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          {notice}
+        </p>
+      )}
       {error && (
         <p className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
           {error}
@@ -200,24 +295,10 @@ export default function DuplicatesClient({
                 )}
               </div>
               <div className="mb-3 flex flex-col gap-3 sm:flex-row">
-                {recCard(p.a, expanded.has(pairKey(p)))}
-                {recCard(p.b, expanded.has(pairKey(p)))}
+                {recCard(p.a, p.b, expanded.has(pairKey(p)))}
+                {recCard(p.b, p.a, expanded.has(pairKey(p)))}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => markDuplicate(p.a, p.b)}
-                  disabled={busy}
-                  className={btn}
-                >
-                  Left is the duplicate
-                </button>
-                <button
-                  onClick={() => markDuplicate(p.b, p.a)}
-                  disabled={busy}
-                  className={btn}
-                >
-                  Right is the duplicate
-                </button>
                 <button onClick={() => dismiss(p)} disabled={busy} className={btn}>
                   Not duplicates
                 </button>
