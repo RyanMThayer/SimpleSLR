@@ -12,17 +12,39 @@ export type OaWork = {
   display_name: string | null;
   publication_year: number | null;
   cited_by_count: number;
+  type?: string | null;
   referenced_works?: string[];
   authorships?: { author?: { display_name?: string | null } }[];
   primary_location?: {
-    source?: { display_name?: string | null } | null;
+    source?: {
+      display_name?: string | null;
+      type?: string | null;
+    } | null;
     landing_page_url?: string | null;
   } | null;
   abstract_inverted_index?: Record<string, number[]> | null;
 };
 
 const SELECT =
-  "id,doi,display_name,publication_year,cited_by_count,referenced_works,authorships,primary_location,abstract_inverted_index";
+  "id,doi,display_name,publication_year,cited_by_count,type,referenced_works,authorships,primary_location,abstract_inverted_index";
+
+/**
+ * A short label when a work is probably not a peer reviewed journal or
+ * conference article: "preprint", "report", "dissertation", "book
+ * chapter", and so on. Null for the default journal article case.
+ * Advisory only; OpenAlex typing is imperfect, so eligibility calls
+ * still belong to screening.
+ */
+export function workKind(w: OaWork): string | null {
+  const t = (w.type ?? "").toLowerCase();
+  const src = (w.primary_location?.source?.type ?? "").toLowerCase();
+  if (t === "article" || t === "review") {
+    if (src === "repository") return "preprint";
+    return null;
+  }
+  if (!t) return null;
+  return t.replace(/-/g, " ");
+}
 
 export async function oa<T>(path: string): Promise<T> {
   const res = await fetch(`/api/openalex?u=${encodeURIComponent(path)}`);

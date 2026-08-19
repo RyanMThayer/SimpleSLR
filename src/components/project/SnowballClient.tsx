@@ -10,6 +10,7 @@ import {
   fetchReferenced,
   resolveWork,
   shortId,
+  workKind,
   workToRef,
   type OaWork,
 } from "@/lib/openalex";
@@ -22,6 +23,8 @@ type Candidate = {
   key: string; // OpenAlex short id
   ref: ParsedRef;
   citedBy: number;
+  /** Probable non journal-article kind ("preprint", "report", ...). */
+  kind: string | null;
   sources: { seedId: string; seed: string; dir: Direction }[];
   existing: boolean;
   selected: boolean;
@@ -193,6 +196,7 @@ export default function SnowballClient({
         key,
         ref,
         citedBy: work.cited_by_count ?? 0,
+        kind: workKind(work),
         sources,
         existing,
         // Everything new starts selected: the default path is to import
@@ -607,6 +611,14 @@ export default function SnowballClient({
                   </span>
                 </span>
                 <span className="flex shrink-0 gap-1">
+                  {c.kind && (
+                    <span
+                      title="Probably not a peer reviewed journal or conference article (OpenAlex typing, advisory only)"
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                    >
+                      {c.kind}
+                    </span>
+                  )}
                   {[...new Set(c.sources.map((s) => s.dir))].map((d) => (
                     <span
                       key={d}
