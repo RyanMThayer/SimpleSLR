@@ -4,7 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
 import { outcomeOf } from "@/lib/outcomes";
-import { findMissingAbstracts, plausibleAbstract } from "@/lib/abstracts";
+import {
+  abstractFromPdfText,
+  findMissingAbstracts,
+  plausibleAbstract,
+} from "@/lib/abstracts";
+import { fetchOaPdfUrls } from "@/lib/openalex";
 import {
   removeFulltext,
   removeFulltextPaths,
@@ -415,6 +420,117 @@ export default function RecordsClient({
     setAbsBusy(false);
   }
 
+  async function fetchOaEnrichment() {
+    if (absBusy) return;
+    setAbsBusy(true);
+    setAbsMsg("Collecting records for the open access sweep...");
+    const supabase = createClient();
+    try {
+      const all: RecordRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error: qErr } = await supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", projectId)
+          .eq("status", "active")
+          .range(from, from + 999);
+        if (qErr) throw new Error(qErr.message);
+        all.push(...((data ?? []) as RecordRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      // Team level title/abstract outcomes decide who needs a PDF.
+      const byRecord = new Map<string, { decision: string }[]>();
+      for (let from = 0; ; from += 1000) {
+        const { data, error: dErr } = await supabase
+          .from("screening_decisions")
+          .select("record_id, decision")
+          .eq("project_id", projectId)
+          .eq("stage", "title_abstract")
+          .range(from, from + 999);
+        if (dErr) throw new Error(dErr.message);
+        (data ?? []).forEach((d) => {
+          const list = byRecord.get(d.record_id) ?? [];
+          list.push(d);
+          byRecord.set(d.record_id, list);
+        });
+        if (!data || data.length < 1000) break;
+      }
+      const taIncluded = new Set(
+        [...byRecord.entries()]
+          .filter(([, decs]) => outcomeOf(decs) === "included")
+          .map(([id]) => id)
+      );
+      const needPdf = new Set(
+        all
+          .filter((r) => taIncluded.has(r.id) && !r.fulltext_path)
+          .map((r) => r.id)
+      );
+      const needAbs = new Set(
+        all.filter((r) => !plausibleAbstract(r.abstract)).map((r) => r.id)
+      );
+      const targets = all.filter(
+        (r) => needPdf.has(r.id) || needAbs.has(r.id)
+      );
+      const withDoi = targets
+        .map((r) => ({ r, d: r.norm_doi ?? normalizeDoi(r.doi) }))
+        .filter((x): x is { r: RecordRow; d: string } => Boolean(x.d));
+      if (withDoi.length === 0) {
+        setAbsMsg(
+          "Nothing to sweep: every full text record has a PDF and every abstract looks fine (or the remainder has no DOI)."
+        );
+        setAbsBusy(false);
+        return;
+      }
+      setAbsMsg(`Looking up open access copies for ${withDoi.length} DOIs...`);
+      const oaMap = await fetchOaPdfUrls(withDoi.map((x) => x.d));
+      const jobs = withDoi.filter((x) => oaMap.has(x.d));
+      let attached = 0;
+      let absFound = 0;
+      for (let i = 0; i < jobs.length; i++) {
+        const { r, d } = jobs[i];
+        setAbsMsg(
+          `Open access: ${i + 1}/${jobs.length} · ${r.title.slice(0, 50)}...`
+        );
+        try {
+          const res = await fetch("/api/oapdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: oaMap.get(d),
+              projectId,
+              recordId: r.id,
+              attach: needPdf.has(r.id),
+              extract: needAbs.has(r.id),
+            }),
+          });
+          if (!res.ok) continue;
+          const out = await res.json();
+          if (out.attached) attached++;
+          if (needAbs.has(r.id) && typeof out.page1 === "string") {
+            const abs = abstractFromPdfText(out.page1);
+            if (abs) {
+              const { error: upErr } = await supabase
+                .from("records")
+                .update({ abstract: abs })
+                .eq("id", r.id);
+              if (!upErr) absFound++;
+            }
+          }
+        } catch {
+          /* skip this record */
+        }
+      }
+      setAbsMsg(
+        `Open access sweep done: ${attached} PDF(s) attached (of ${needPdf.size} full text records without one), ${absFound} abstract(s) extracted from PDFs (of ${needAbs.size} still missing). ${withDoi.length - jobs.length} record(s) had no open access copy; those need manual retrieval or pasting.`
+      );
+      load();
+    } catch (e) {
+      setAbsMsg(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setAbsBusy(false);
+  }
+
   async function deleteRecord(r: RecordRow) {
     const supabase = createClient();
     const ok = window.confirm(
@@ -749,9 +865,16 @@ export default function RecordsClient({
         >
           {absBusy ? "Searching..." : "Find missing abstracts"}
         </button>
+        <button
+          onClick={fetchOaEnrichment}
+          disabled={absBusy}
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          {absBusy ? "Working..." : "Fetch open access PDFs"}
+        </button>
         <p className="min-w-0 flex-1 text-sm text-zinc-600 dark:text-zinc-300">
           {absMsg ??
-            "Looks up every active record whose abstract is missing or looks like index junk (author lists, reference sections) in OpenAlex, Semantic Scholar, and Crossref. Whatever stays missing can be pasted by hand in the screening room or via Edit."}
+            "Find missing abstracts checks OpenAlex, Semantic Scholar, Crossref, Europe PMC, and OpenAIRE for every record whose abstract is missing or looks like index junk. Fetch open access PDFs attaches free full texts to records that passed title/abstract and pulls abstracts straight from the PDFs of whatever is still missing. The rest is manual: paste in the screening room or via Edit."}
         </p>
       </div>
 

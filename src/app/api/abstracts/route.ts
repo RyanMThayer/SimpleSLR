@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+import { europePmcAbstract, openaireAbstract } from "@/lib/abstracts";
+
 /**
  * Authenticated proxy for abstract lookups, keeping third party CORS
- * behavior out of the browser. Both sources are free and keyless:
- * GET  ?doi=...  -> Crossref (raw JATS abstract, stripped client side)
+ * behavior out of the browser. All sources are free and keyless:
+ * GET  ?doi=...&src=crossref|europepmc|openaire
+ *      -> one abstract (raw markup allowed; stripped client side)
  * POST {ids: [doi, ...]} -> Semantic Scholar batch (plain abstracts)
  */
 
@@ -25,23 +28,39 @@ export async function GET(request: Request) {
   }
   const { searchParams } = new URL(request.url);
   const doi = searchParams.get("doi");
-  if (!doi || doi.length > 300 || doi.includes("..")) {
+  const src = searchParams.get("src") ?? "crossref";
+  if (
+    !doi ||
+    doi.length > 300 ||
+    doi.includes("..") ||
+    !["crossref", "europepmc", "openaire"].includes(src)
+  ) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  const url =
+    src === "europepmc"
+      ? `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(
+          `DOI:"${doi}"`
+        )}&resultType=core&format=json&pageSize=1`
+      : src === "openaire"
+        ? `https://api.openaire.eu/search/publications?doi=${encodeURIComponent(doi)}&format=json`
+        : `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
   try {
-    const res = await fetch(
-      `https://api.crossref.org/works/${encodeURIComponent(doi)}`,
-      {
-        headers: { "User-Agent": UA, Accept: "application/json" },
-        next: { revalidate: 3600 },
-      }
-    );
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      next: { revalidate: 3600 },
+    });
     if (!res.ok) {
-      // 404 just means Crossref does not know the DOI.
+      // A 404 just means the source does not know the DOI.
       return NextResponse.json({ abstract: null });
     }
     const body = await res.json();
-    const abs = body?.message?.abstract;
+    const abs =
+      src === "europepmc"
+        ? europePmcAbstract(body)
+        : src === "openaire"
+          ? openaireAbstract(body)
+          : body?.message?.abstract;
     return NextResponse.json({
       abstract: typeof abs === "string" ? abs : null,
     });

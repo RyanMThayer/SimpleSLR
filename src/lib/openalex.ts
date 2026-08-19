@@ -122,6 +122,36 @@ export async function fetchWorksByIds(ids: string[]): Promise<OaWork[]> {
   return out;
 }
 
+/**
+ * Best open access PDF url per DOI, from OpenAlex's OA data (fed by
+ * Unpaywall). Only https urls are returned.
+ */
+export async function fetchOaPdfUrls(dois: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const clean = dois.filter((d) => d && !/[|,]/.test(d));
+  for (let i = 0; i < clean.length; i += 40) {
+    const chunk = clean.slice(i, i + 40);
+    try {
+      const res = await oa<{
+        results: {
+          doi: string | null;
+          best_oa_location?: { pdf_url?: string | null } | null;
+        }[];
+      }>(
+        `works?filter=doi:${chunk.join("|")}&per-page=50&select=doi,best_oa_location`
+      );
+      for (const w of res.results ?? []) {
+        const d = normalizeDoi(w.doi);
+        const u = w.best_oa_location?.pdf_url;
+        if (d && u && /^https:\/\//.test(u)) out.set(d, u);
+      }
+    } catch {
+      /* skip this chunk */
+    }
+  }
+  return out;
+}
+
 export type ForwardResult = {
   works: OaWork[];
   total: number;

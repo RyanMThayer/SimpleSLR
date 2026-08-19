@@ -70,6 +70,68 @@ export type AbstractSearchResult = {
   notes: string[];
 };
 
+function dig(obj: unknown, ...keys: string[]): unknown {
+  let cur: unknown = obj;
+  for (const k of keys) {
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) {
+      cur = (cur as Record<string, unknown>)[k];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+/** Abstract text from a Europe PMC search response, if any. */
+export function europePmcAbstract(body: unknown): string | null {
+  const result = dig(body, "resultList", "result");
+  const first = Array.isArray(result) ? result[0] : result;
+  const abs = dig(first, "abstractText");
+  return typeof abs === "string" && abs.trim() ? abs : null;
+}
+
+/** Abstract text from an OpenAIRE publications response, if any. */
+export function openaireAbstract(body: unknown): string | null {
+  let result = dig(body, "response", "results", "result");
+  if (Array.isArray(result)) result = result[0];
+  const desc = dig(result, "metadata", "oaf:entity", "oaf:result", "description");
+  const list = Array.isArray(desc) ? desc : desc != null ? [desc] : [];
+  for (const d of list) {
+    if (typeof d === "string" && d.trim()) return d;
+    const s = dig(d, "$");
+    if (typeof s === "string" && s.trim()) return s;
+  }
+  return null;
+}
+
+/**
+ * Pull the abstract out of a paper's first pages of extracted text.
+ * Conservative: requires an explicit "Abstract" marker and returns null
+ * unless the captured span still reads as a plausible abstract.
+ */
+export function abstractFromPdfText(text: string): string | null {
+  const t = text.replace(/\s+/g, " ").trim();
+  const m = /\babstract\b[\s.:—–-]*/i.exec(t.slice(0, 6000));
+  if (!m) return null;
+  const rest = t.slice(m.index + m[0].length, m.index + m[0].length + 4000);
+  const ends: number[] = [];
+  const endRe =
+    /\b(keywords?\s*[:.—–-]|index terms|jel classification|ccs concepts|acm reference format|1\s*[.:]?\s+introduction\b|i\s*\.\s+introduction\b)/i;
+  const em = endRe.exec(rest);
+  if (em) ends.push(em.index);
+  // A bare capitalized "Introduction" heading, but only once a real
+  // abstract length has passed, so in-text mentions do not truncate.
+  const intro = / Introduction /.exec(rest.slice(300));
+  if (intro) ends.push(300 + intro.index);
+  let abs = ends.length > 0 ? rest.slice(0, Math.min(...ends)) : rest.slice(0, 2600);
+  if (ends.length === 0) {
+    const lastDot = abs.lastIndexOf(". ");
+    if (lastDot > 200) abs = abs.slice(0, lastDot + 1);
+  }
+  abs = abs.trim();
+  return plausibleAbstract(abs) ? abs : null;
+}
+
 /** The record fields abstract lookup needs; RecordRow satisfies this. */
 export type LookupRecord = Pick<
   RecordRow,
@@ -170,26 +232,36 @@ export async function findMissingAbstracts(
     }
   }
 
-  // 3) Crossref, one DOI at a time, for the remainder.
-  const forCr = dois.filter((d) =>
-    (byDoi.get(d) ?? []).some((r) => !found.has(r.id))
-  );
-  for (let i = 0; i < forCr.length; i++) {
-    if (i % 10 === 0) {
-      onProgress(`Crossref: checking DOIs ${i + 1}/${forCr.length}...`);
-    }
-    try {
-      const res = await fetch(
-        `/api/abstracts?doi=${encodeURIComponent(forCr[i])}`
-      );
-      if (!res.ok) continue;
-      const body = await res.json();
-      if (typeof body.abstract === "string") {
-        const text = jatsToText(body.abstract);
-        if (text && plausibleAbstract(text)) push(forCr[i], text, "Crossref");
+  // 3) Per-DOI fallbacks for the remainder: Crossref (publisher
+  // deposits), Europe PMC (life and social science mirrors), and
+  // OpenAIRE (European repository aggregation).
+  const PER_DOI_SOURCES = [
+    { src: "crossref", label: "Crossref" },
+    { src: "europepmc", label: "Europe PMC" },
+    { src: "openaire", label: "OpenAIRE" },
+  ];
+  for (const { src, label } of PER_DOI_SOURCES) {
+    const todo = dois.filter((d) =>
+      (byDoi.get(d) ?? []).some((r) => !found.has(r.id))
+    );
+    if (todo.length === 0) break;
+    for (let i = 0; i < todo.length; i++) {
+      if (i % 10 === 0) {
+        onProgress(`${label}: checking DOIs ${i + 1}/${todo.length}...`);
       }
-    } catch {
-      /* skip this DOI */
+      try {
+        const res = await fetch(
+          `/api/abstracts?src=${src}&doi=${encodeURIComponent(todo[i])}`
+        );
+        if (!res.ok) continue;
+        const body = await res.json();
+        if (typeof body.abstract === "string") {
+          const text = jatsToText(body.abstract);
+          if (text && plausibleAbstract(text)) push(todo[i], text, label);
+        }
+      } catch {
+        /* skip this DOI */
+      }
     }
   }
 
