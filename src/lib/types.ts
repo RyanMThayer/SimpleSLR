@@ -124,6 +124,15 @@ export type ExclusionReason = {
   position: number;
 };
 
+/** Optional code attached to include decisions, with a custom hotkey. */
+export type InclusionCode = {
+  id: string;
+  project_id: string;
+  label: string;
+  hotkey: string;
+  position: number;
+};
+
 export type Stage = "title_abstract" | "full_text";
 export type Decision = "include" | "exclude";
 
@@ -134,6 +143,7 @@ export type ScreeningDecision = {
   stage: Stage;
   decision: Decision;
   reason_id: string | null;
+  inclusion_code_id: string | null;
   note: string | null;
   decided_by: string;
   decided_at: string;

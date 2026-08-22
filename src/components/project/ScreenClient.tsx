@@ -13,6 +13,7 @@ import {
 import type {
   Decision,
   ExclusionReason,
+  InclusionCode,
   Project,
   RecordRow,
   Stage,
@@ -149,8 +150,24 @@ export default function ScreenClient({
   // Review mode: walk through records already screened at this stage.
   const [reviewing, setReviewing] = useState(false);
   const [myDecisions, setMyDecisions] = useState<
-    Map<string, { decision: Decision; reason_id: string | null }>
+    Map<
+      string,
+      {
+        decision: Decision;
+        reason_id: string | null;
+        inclusion_code_id: string | null;
+      }
+    >
   >(new Map());
+  // Inclusion codes (optional tags on include decisions)
+  const [incCodes, setIncCodes] = useState<InclusionCode[]>([]);
+  const [incCodesMissing, setIncCodesMissing] = useState(false);
+  const [manageIncOpen, setManageIncOpen] = useState(false);
+  const [newIncLabel, setNewIncLabel] = useState("");
+  const [newIncKey, setNewIncKey] = useState("");
+  const [editingIncId, setEditingIncId] = useState<string | null>(null);
+  const [editingIncLabel, setEditingIncLabel] = useState("");
+  const [editingIncKey, setEditingIncKey] = useState("");
 
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -187,16 +204,33 @@ export default function ScreenClient({
       .order("position");
     setReasons((reasonRows ?? []) as ExclusionReason[]);
 
+    // Inclusion codes exist from migration 0012 onward; before that the
+    // panel simply offers plain include.
+    const { data: codeRows, error: codeErr } = await supabase
+      .from("inclusion_codes")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("position");
+    setIncCodes(codeErr ? [] : ((codeRows ?? []) as InclusionCode[]));
+    setIncCodesMissing(Boolean(codeErr?.message.includes("does not exist")));
+
     // Which records has this user already decided at this stage?
     const decided = new Set<string>();
     const myDecs = new Map<
       string,
-      { decision: Decision; reason_id: string | null }
+      {
+        decision: Decision;
+        reason_id: string | null;
+        inclusion_code_id: string | null;
+      }
     >();
+    const decSelect = codeErr
+      ? "record_id, decision, reason_id"
+      : "record_id, decision, reason_id, inclusion_code_id";
     for (let from = 0; ; from += 1000) {
       const { data, error: dErr } = await supabase
         .from("screening_decisions")
-        .select("record_id, decision, reason_id")
+        .select(decSelect)
         .eq("project_id", project.id)
         .eq("stage", stage)
         .eq("decided_by", userId)
@@ -205,11 +239,19 @@ export default function ScreenClient({
         setError(dErr.message);
         return;
       }
-      (data ?? []).forEach((d) => {
+      (
+        (data ?? []) as unknown as {
+          record_id: string;
+          decision: string;
+          reason_id: string | null;
+          inclusion_code_id?: string | null;
+        }[]
+      ).forEach((d) => {
         decided.add(d.record_id);
         myDecs.set(d.record_id, {
           decision: d.decision as Decision,
           reason_id: d.reason_id,
+          inclusion_code_id: d.inclusion_code_id ?? null,
         });
       });
       if (!data || data.length < 1000) break;
@@ -430,23 +472,39 @@ export default function ScreenClient({
   }, [queue]);
 
   const decide = useCallback(
-    async (decision: Decision, reasonId: string | null = null) => {
+    async (
+      decision: Decision,
+      reasonId: string | null = null,
+      inclusionCodeId: string | null = null
+    ) => {
       if (!current || !queue || saving) return;
       setSaving(true);
       const supabase = createClient();
       // At the full text stage PRISMA wants a reason for every exclusion.
       if (stage === "full_text" && decision === "exclude" && !reasonId) return;
-      const { error: insErr } = await supabase.from("screening_decisions").upsert(
-        {
-          project_id: project.id,
-          record_id: current.id,
-          stage,
-          decision,
-          reason_id: reasonId,
-          decided_by: userId,
-        },
-        { onConflict: "record_id,stage,decided_by" }
-      );
+      const codeId = decision === "include" ? inclusionCodeId : null;
+      const row: Record<string, unknown> = {
+        project_id: project.id,
+        record_id: current.id,
+        stage,
+        decision,
+        reason_id: reasonId,
+        decided_by: userId,
+      };
+      // Written separately so projects that have not run migration 0012
+      // yet keep working: retry without the column if it is unknown.
+      let insErr = (
+        await supabase
+          .from("screening_decisions")
+          .upsert({ ...row, inclusion_code_id: codeId }, { onConflict: "record_id,stage,decided_by" })
+      ).error;
+      if (insErr && insErr.message.includes("inclusion_code_id")) {
+        insErr = (
+          await supabase
+            .from("screening_decisions")
+            .upsert(row, { onConflict: "record_id,stage,decided_by" })
+        ).error;
+      }
       setSaving(false);
       if (insErr) {
         setError(insErr.message);
@@ -454,7 +512,11 @@ export default function ScreenClient({
       }
       setMyDecisions((m) => {
         const next = new Map(m);
-        next.set(current.id, { decision, reason_id: reasonId });
+        next.set(current.id, {
+          decision,
+          reason_id: reasonId,
+          inclusion_code_id: codeId,
+        });
         return next;
       });
       const at = Math.min(idx, queue.length - 1);
@@ -576,11 +638,14 @@ export default function ScreenClient({
         markNoAccess();
       } else if (k === "u") {
         undo();
+      } else {
+        const code = incCodes.find((c) => c.hotkey === k);
+        if (code) decide("include", null, code.id);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, decide, undo, goNext, goPrev, markNoAccess, editConfirm, stage]);
+  }, [reasons, incCodes, decide, undo, goNext, goPrev, markNoAccess, editConfirm, stage]);
 
   // ----- criteria editing -----
 
@@ -611,6 +676,87 @@ export default function ScreenClient({
       .select("id", { count: "exact", head: true })
       .eq("reason_id", reasonId);
     return count ?? 0;
+  }
+
+  // ----- inclusion code management -----
+
+  function validIncKey(raw: string, ignoreId: string | null): string | null {
+    const k = raw.trim().toLowerCase();
+    if (!/^[a-z]$/.test(k)) return null;
+    if (["i", "e", "n", "u", "m"].includes(k)) return null;
+    if (incCodes.some((c) => c.hotkey === k && c.id !== ignoreId)) return null;
+    return k;
+  }
+
+  function suggestIncKey(): string {
+    const used = new Set(incCodes.map((c) => c.hotkey));
+    return (
+      "abcdfghjklopqrstvwxyz".split("").find((k) => !used.has(k)) ?? ""
+    );
+  }
+
+  async function addIncCode(e: React.FormEvent) {
+    e.preventDefault();
+    const label = newIncLabel.trim();
+    if (!label) return;
+    const hotkey = validIncKey(newIncKey, null) ?? suggestIncKey();
+    const supabase = createClient();
+    const position =
+      incCodes.length > 0
+        ? Math.max(...incCodes.map((c) => c.position)) + 1
+        : 0;
+    const { data, error: insErr } = await supabase
+      .from("inclusion_codes")
+      .insert({ project_id: project.id, label, hotkey, position })
+      .select("*")
+      .single();
+    if (insErr) {
+      setError(
+        insErr.message.includes("does not exist")
+          ? "Inclusion codes need migration 0012_inclusion_codes.sql; run it in the Supabase SQL Editor first."
+          : insErr.message
+      );
+      return;
+    }
+    setIncCodes((cs) => [...cs, data as InclusionCode]);
+    setNewIncLabel("");
+    setNewIncKey("");
+  }
+
+  async function saveIncEdit(c: InclusionCode) {
+    const label = editingIncLabel.trim();
+    if (!label) return;
+    const hotkey = validIncKey(editingIncKey, c.id) ?? c.hotkey;
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("inclusion_codes")
+      .update({ label, hotkey })
+      .eq("id", c.id);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setIncCodes((cs) =>
+      cs.map((x) => (x.id === c.id ? { ...x, label, hotkey } : x))
+    );
+    setEditingIncId(null);
+  }
+
+  async function deleteIncCode(c: InclusionCode) {
+    const ok = window.confirm(
+      `Delete the inclusion code "${c.label}"? Include decisions keep their include status; only this code tag is removed from them.`
+    );
+    if (!ok) return;
+    const supabase = createClient();
+    const { error: delErr } = await supabase
+      .from("inclusion_codes")
+      .delete()
+      .eq("id", c.id);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    setIncCodes((cs) => cs.filter((x) => x.id !== c.id));
   }
 
   async function addReason(e: React.FormEvent) {
@@ -807,12 +953,19 @@ export default function ScreenClient({
               const d = myDecisions.get(current.id);
               if (!d)
                 return <span className="font-medium">none recorded</span>;
-              if (d.decision === "include")
+              if (d.decision === "include") {
+                const code = d.inclusion_code_id
+                  ? incCodes.find((c) => c.id === d.inclusion_code_id)
+                  : null;
                 return (
                   <span className="font-medium text-emerald-600 dark:text-emerald-400">
                     Include
+                    {code
+                      ? `: ${code.hotkey.toUpperCase()} (${code.label})`
+                      : ""}
                   </span>
                 );
+              }
               const ri = d.reason_id
                 ? reasons.findIndex((r) => r.id === d.reason_id)
                 : -1;
@@ -1303,6 +1456,138 @@ export default function ScreenClient({
               <p className="mt-2 text-xs text-zinc-400">
                 Keys 1-9 cover the first nine reasons; the rest are click
                 only.
+              </p>
+            )}
+          </div>
+
+          <div className={sideCard}>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                Include
+              </h3>
+              <button
+                onClick={() => setManageIncOpen(!manageIncOpen)}
+                className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+              >
+                {manageIncOpen ? "done" : "manage"}
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => decide("include")}
+                disabled={saving || !current}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-800 transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-emerald-950"
+              >
+                <span className={keyChip}>I</span>
+                <span className="min-w-0 flex-1">Include</span>
+              </button>
+              {incCodes.map((c) => (
+                <div key={c.id} className="flex items-center gap-2">
+                  {editingIncId === c.id ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        saveIncEdit(c);
+                      }}
+                      className="flex flex-1 items-center gap-2"
+                    >
+                      <input
+                        className={`${inputCls} h-8 w-10 py-0 text-center`}
+                        value={editingIncKey}
+                        onChange={(e) => setEditingIncKey(e.target.value)}
+                        maxLength={1}
+                        title="Hotkey: one letter, not I/E/N/U or a digit"
+                      />
+                      <input
+                        className={`${inputCls} h-8 py-0`}
+                        value={editingIncLabel}
+                        onChange={(e) => setEditingIncLabel(e.target.value)}
+                        autoFocus
+                      />
+                      <button type="submit" className="text-xs underline underline-offset-2">
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingIncId(null)}
+                        className="text-xs text-zinc-400 underline underline-offset-2"
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => decide("include", null, c.id)}
+                        disabled={saving || !current}
+                        className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-800 transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-emerald-950"
+                      >
+                        <span className={keyChip}>
+                          {c.hotkey ? c.hotkey.toUpperCase() : "·"}
+                        </span>
+                        <span className="min-w-0 flex-1">{c.label}</span>
+                      </button>
+                      {manageIncOpen && (
+                        <span className="flex shrink-0 gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingIncId(c.id);
+                              setEditingIncLabel(c.label);
+                              setEditingIncKey(c.hotkey);
+                            }}
+                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                          >
+                            edit
+                          </button>
+                          <button
+                            onClick={() => deleteIncCode(c)}
+                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                          >
+                            delete
+                          </button>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {manageIncOpen && (
+              <form onSubmit={addIncCode} className="mt-2 flex gap-2">
+                <input
+                  className={`${inputCls} h-8 w-10 py-0 text-center`}
+                  placeholder={suggestIncKey().toUpperCase()}
+                  value={newIncKey}
+                  onChange={(e) => setNewIncKey(e.target.value)}
+                  maxLength={1}
+                  title="Hotkey: one letter, not I/E/N/U or a digit; blank picks the next free one"
+                />
+                <input
+                  className={`${inputCls} h-8 flex-1 py-0`}
+                  placeholder="New inclusion code"
+                  value={newIncLabel}
+                  onChange={(e) => setNewIncLabel(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="rounded-full border border-zinc-300 px-3 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  Add
+                </button>
+              </form>
+            )}
+            {manageIncOpen && (
+              <p className="mt-2 text-xs text-zinc-400">
+                Codes tag an include decision (I stays plain include).
+                Hotkeys are single letters; digits and I/E/N/U are taken.
+              </p>
+            )}
+            {incCodesMissing && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                Inclusion codes need migration 0012_inclusion_codes.sql; run
+                it in the Supabase SQL Editor.
               </p>
             )}
           </div>

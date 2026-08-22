@@ -703,12 +703,13 @@ export default function PrismaClient({ project }: { project: Project }) {
         return [];
       }
     };
-    const [concepts, conceptTags, conceptExcerpts, snowballLinks] =
+    const [concepts, conceptTags, conceptExcerpts, snowballLinks, inclusionCodes] =
       await Promise.all([
         fetchAll("concepts"),
         fetchAll("concept_tags"),
         fetchAll("concept_excerpts"),
         fetchAll("snowball_links"),
+        fetchAll("inclusion_codes"),
       ]);
     downloadFile(
       `${base}-backup.json`,
@@ -726,6 +727,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           concept_tags: conceptTags,
           concept_excerpts: conceptExcerpts,
           snowball_links: snowballLinks,
+          inclusion_codes: inclusionCodes,
         },
         null,
         2
@@ -786,10 +788,19 @@ export default function PrismaClient({ project }: { project: Project }) {
     );
   }
 
-  function exportLogCsv() {
+  async function exportLogCsv() {
     if (!data) return;
     const reasonLabel = new Map(data.reasons.map((r) => [r.id, r.label]));
     const recById = new Map(data.records.map((r) => [r.id, r]));
+    // Inclusion code labels (empty before migration 0012).
+    const supabase = createClient();
+    const { data: codes } = await supabase
+      .from("inclusion_codes")
+      .select("id, label")
+      .eq("project_id", project.id);
+    const codeLabel = new Map(
+      ((codes ?? []) as { id: string; label: string }[]).map((c) => [c.id, c.label])
+    );
     const rows = data.decisions.map((d) => {
       const rec = recById.get(d.record_id);
       const who = data.profiles.get(d.decided_by);
@@ -798,6 +809,9 @@ export default function PrismaClient({ project }: { project: Project }) {
         d.stage,
         d.decision,
         d.reason_id ? (reasonLabel.get(d.reason_id) ?? "") : "",
+        d.inclusion_code_id
+          ? (codeLabel.get(d.inclusion_code_id) ?? "")
+          : "",
         who?.email ?? who?.display_name ?? d.decided_by,
         rec?.title ?? "",
         rec?.doi ?? "",
@@ -806,7 +820,16 @@ export default function PrismaClient({ project }: { project: Project }) {
     downloadFile(
       `${base}-screening-log.csv`,
       buildCsv(
-        ["timestamp", "stage", "decision", "reason", "reviewer", "title", "doi"],
+        [
+          "timestamp",
+          "stage",
+          "decision",
+          "reason",
+          "inclusion code",
+          "reviewer",
+          "title",
+          "doi",
+        ],
         rows
       ),
       "text/csv"

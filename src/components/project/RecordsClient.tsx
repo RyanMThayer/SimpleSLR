@@ -27,6 +27,7 @@ import type { Decision, Stage } from "@/lib/types";
 import type {
   ExclusionReason,
   ImportBatch,
+  InclusionCode,
   RecordRow,
   ScreeningDecision,
 } from "@/lib/types";
@@ -70,6 +71,7 @@ export default function RecordsClient({
   );
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
+  const [inclusionCodes, setInclusionCodes] = useState<InclusionCode[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -111,6 +113,14 @@ export default function RecordsClient({
     const dbs = (dbRes.data ?? []) as { id: string; name: string }[];
     const allBatches = (batchRes.data ?? []) as ImportBatch[];
     setReasons((reasonRes.data ?? []) as ExclusionReason[]);
+
+    // Present from migration 0012 onward; absence just hides the codes.
+    const { data: codeRows } = await supabase
+      .from("inclusion_codes")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("position");
+    setInclusionCodes((codeRows ?? []) as InclusionCode[]);
 
     const raw: SourceSummary[] = [];
     for (const db of dbs) {
@@ -619,20 +629,35 @@ export default function RecordsClient({
     r: RecordRow,
     stage: Stage,
     decision: Decision,
-    reasonId: string | null
+    reasonId: string | null,
+    inclusionCodeId: string | null = null
   ) {
     const supabase = createClient();
-    const { error: upErr } = await supabase.from("screening_decisions").upsert(
-      {
-        project_id: projectId,
-        record_id: r.id,
-        stage,
-        decision,
-        reason_id: reasonId,
-        decided_by: userId,
-      },
-      { onConflict: "record_id,stage,decided_by" }
-    );
+    const row = {
+      project_id: projectId,
+      record_id: r.id,
+      stage,
+      decision,
+      reason_id: reasonId,
+      decided_by: userId,
+    };
+    const codeId = decision === "include" ? inclusionCodeId : null;
+    // Retry without the column for projects that predate migration 0012.
+    let upErr = (
+      await supabase
+        .from("screening_decisions")
+        .upsert(
+          { ...row, inclusion_code_id: codeId },
+          { onConflict: "record_id,stage,decided_by" }
+        )
+    ).error;
+    if (upErr && upErr.message.includes("inclusion_code_id")) {
+      upErr = (
+        await supabase
+          .from("screening_decisions")
+          .upsert(row, { onConflict: "record_id,stage,decided_by" })
+      ).error;
+    }
     if (upErr) {
       setError(upErr.message);
       return;
@@ -742,8 +767,19 @@ export default function RecordsClient({
   const reasonCode = new Map<string, { code: string; label: string }>(
     reasons.map((r, i) => [r.id, { code: `E${i + 1}`, label: r.label }])
   );
+  const codeById = new Map(inclusionCodes.map((c) => [c.id, c]));
   const decisionText = (d: ScreeningDecision) => {
-    if (d.decision === "include") return { text: "include", tip: "Included" };
+    if (d.decision === "include") {
+      const code = d.inclusion_code_id
+        ? codeById.get(d.inclusion_code_id)
+        : null;
+      return code
+        ? {
+            text: `include: ${code.hotkey.toUpperCase()}`,
+            tip: code.label,
+          }
+        : { text: "include", tip: "Included" };
+    }
     const rc = d.reason_id ? reasonCode.get(d.reason_id) : null;
     return rc
       ? { text: `exclude: ${rc.code}`, tip: rc.label }
@@ -770,6 +806,35 @@ export default function RecordsClient({
         >
           Include
         </button>
+        {inclusionCodes.length > 0 && (
+          <select
+            value={isInc ? (mine?.inclusion_code_id ?? "__plain") : "__unset"}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__unset") return;
+              setMyDecision(
+                r,
+                stage,
+                "include",
+                null,
+                v === "__plain" ? null : v
+              );
+            }}
+            className={`h-7 rounded-full border px-2 text-xs ${
+              isInc
+                ? "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+            }`}
+          >
+            <option value="__unset">Include with code...</option>
+            <option value="__plain">Include, no code</option>
+            {inclusionCodes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.hotkey.toUpperCase()}: {c.label}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           value={isExc ? (mine?.reason_id ?? "__none") : "__unset"}
           onChange={(e) => {
