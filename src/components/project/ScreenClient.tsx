@@ -859,6 +859,8 @@ export default function ScreenClient({
     "flex h-6 min-w-6 shrink-0 items-center justify-center rounded bg-zinc-100 px-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
   const inputCls =
     "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+  const keyInputCls =
+    "h-8 w-12 shrink-0 rounded-lg border border-zinc-300 bg-white py-0 text-center text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
   const hasCriteria = Boolean(incText.trim() || excText.trim());
 
@@ -1493,14 +1495,14 @@ export default function ScreenClient({
                       className="flex flex-1 items-center gap-2"
                     >
                       <input
-                        className={`${inputCls} h-8 w-10 py-0 text-center`}
+                        className={keyInputCls}
                         value={editingIncKey}
                         onChange={(e) => setEditingIncKey(e.target.value)}
                         maxLength={1}
                         title="Hotkey: one letter, not I/E/N/U or a digit"
                       />
                       <input
-                        className={`${inputCls} h-8 py-0`}
+                        className={`${inputCls} h-8 min-w-0 flex-1 py-0`}
                         value={editingIncLabel}
                         onChange={(e) => setEditingIncLabel(e.target.value)}
                         autoFocus
@@ -1557,7 +1559,7 @@ export default function ScreenClient({
             {manageIncOpen && (
               <form onSubmit={addIncCode} className="mt-2 flex gap-2">
                 <input
-                  className={`${inputCls} h-8 w-10 py-0 text-center`}
+                  className={keyInputCls}
                   placeholder={suggestIncKey().toUpperCase()}
                   value={newIncKey}
                   onChange={(e) => setNewIncKey(e.target.value)}
@@ -1565,7 +1567,7 @@ export default function ScreenClient({
                   title="Hotkey: one letter, not I/E/N/U or a digit; blank picks the next free one"
                 />
                 <input
-                  className={`${inputCls} h-8 flex-1 py-0`}
+                  className={`${inputCls} h-8 min-w-0 flex-1 py-0`}
                   placeholder="New inclusion code"
                   value={newIncLabel}
                   onChange={(e) => setNewIncLabel(e.target.value)}
