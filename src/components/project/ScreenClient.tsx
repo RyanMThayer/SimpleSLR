@@ -168,6 +168,18 @@ export default function ScreenClient({
   const [editingIncId, setEditingIncId] = useState<string | null>(null);
   const [editingIncLabel, setEditingIncLabel] = useState("");
   const [editingIncKey, setEditingIncKey] = useState("");
+  // Dialogs for reorganizing a used inclusion code
+  const [incDelete, setIncDelete] = useState<{
+    code: InclusionCode;
+    affected: number;
+  } | null>(null);
+  const [incMigrateTarget, setIncMigrateTarget] = useState("");
+  const [incEditConfirm, setIncEditConfirm] = useState<{
+    code: InclusionCode;
+    newLabel: string;
+    newKey: string;
+    affected: number;
+  } | null>(null);
 
   // Full text PDF viewing and upload
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -615,7 +627,7 @@ export default function ScreenClient({
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-      if (editConfirm) return; // a decision dialog is open
+      if (editConfirm || incDelete || incEditConfirm) return; // a dialog is open
 
       const k = e.key.toLowerCase();
       if (/^[1-9]$/.test(e.key)) {
@@ -645,7 +657,7 @@ export default function ScreenClient({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, incCodes, decide, undo, goNext, goPrev, markNoAccess, editConfirm, stage]);
+  }, [reasons, incCodes, decide, undo, goNext, goPrev, markNoAccess, editConfirm, incDelete, incEditConfirm, stage]);
 
   // ----- criteria editing -----
 
@@ -723,10 +735,20 @@ export default function ScreenClient({
     setNewIncKey("");
   }
 
-  async function saveIncEdit(c: InclusionCode) {
-    const label = editingIncLabel.trim();
-    if (!label) return;
-    const hotkey = validIncKey(editingIncKey, c.id) ?? c.hotkey;
+  async function incImpact(codeId: string): Promise<number> {
+    const supabase = createClient();
+    const { count } = await supabase
+      .from("screening_decisions")
+      .select("id", { count: "exact", head: true })
+      .eq("inclusion_code_id", codeId);
+    return count ?? 0;
+  }
+
+  async function applyIncUpdate(
+    c: InclusionCode,
+    label: string,
+    hotkey: string
+  ): Promise<boolean> {
     const supabase = createClient();
     const { error: upErr } = await supabase
       .from("inclusion_codes")
@@ -734,29 +756,119 @@ export default function ScreenClient({
       .eq("id", c.id);
     if (upErr) {
       setError(upErr.message);
-      return;
+      return false;
     }
     setIncCodes((cs) =>
       cs.map((x) => (x.id === c.id ? { ...x, label, hotkey } : x))
     );
+    return true;
+  }
+
+  async function saveIncEdit(c: InclusionCode) {
+    const label = editingIncLabel.trim();
+    if (!label) return;
+    const hotkey = validIncKey(editingIncKey, c.id) ?? c.hotkey;
+    // A pure hotkey change is cosmetic; only a label change can mean
+    // the code itself changed and the tagged papers need rejudging.
+    if (label !== c.label) {
+      const affected = await incImpact(c.id);
+      if (affected > 0) {
+        setIncEditConfirm({ code: c, newLabel: label, newKey: hotkey, affected });
+        return;
+      }
+    }
+    if (await applyIncUpdate(c, label, hotkey)) setEditingIncId(null);
+  }
+
+  async function confirmIncEdit(reset: boolean) {
+    if (!incEditConfirm) return;
+    const { code, newLabel, newKey } = incEditConfirm;
+    if (!(await applyIncUpdate(code, newLabel, newKey))) {
+      setIncEditConfirm(null);
+      return;
+    }
+    if (reset) {
+      const supabase = createClient();
+      const { error: rpcErr } = await supabase.rpc("resolve_inclusion_code", {
+        p_code: code.id,
+        p_action: "reset",
+        p_target: null,
+        p_delete: false,
+      });
+      if (rpcErr) {
+        setError(
+          rpcErr.message.includes("Could not find the function")
+            ? "This action needs migration 0013_inclusion_code_moves.sql; run it in the Supabase SQL Editor first."
+            : rpcErr.message
+        );
+        setIncEditConfirm(null);
+        return;
+      }
+    }
+    setIncEditConfirm(null);
     setEditingIncId(null);
+    load();
   }
 
   async function deleteIncCode(c: InclusionCode) {
-    const ok = window.confirm(
-      `Delete the inclusion code "${c.label}"? Include decisions keep their include status; only this code tag is removed from them.`
-    );
-    if (!ok) return;
-    const supabase = createClient();
-    const { error: delErr } = await supabase
-      .from("inclusion_codes")
-      .delete()
-      .eq("id", c.id);
-    if (delErr) {
-      setError(delErr.message);
+    const affected = await incImpact(c.id);
+    if (affected === 0) {
+      const ok = window.confirm(
+        `Delete the inclusion code "${c.label}"? No decisions currently use it.`
+      );
+      if (!ok) return;
+      const supabase = createClient();
+      const { error: delErr } = await supabase
+        .from("inclusion_codes")
+        .delete()
+        .eq("id", c.id);
+      if (delErr) {
+        setError(delErr.message);
+        return;
+      }
+      setIncCodes((cs) => cs.filter((x) => x.id !== c.id));
       return;
     }
-    setIncCodes((cs) => cs.filter((x) => x.id !== c.id));
+    setIncMigrateTarget("");
+    setIncDelete({ code: c, affected });
+  }
+
+  async function resolveIncDelete(action: "keep" | "migrate" | "reset") {
+    if (!incDelete) return;
+    const supabase = createClient();
+    if (action === "keep") {
+      // The foreign key is on delete set null, so a plain delete keeps
+      // every include decision and just clears the tag. Works even
+      // before migration 0013.
+      const { error: delErr } = await supabase
+        .from("inclusion_codes")
+        .delete()
+        .eq("id", incDelete.code.id);
+      if (delErr) {
+        setError(delErr.message);
+        setIncDelete(null);
+        return;
+      }
+    } else {
+      const { error: rpcErr } = await supabase.rpc("resolve_inclusion_code", {
+        p_code: incDelete.code.id,
+        p_action: action,
+        p_target: action === "migrate" ? incMigrateTarget : null,
+        p_delete: true,
+      });
+      if (rpcErr) {
+        setError(
+          rpcErr.message.includes("Could not find the function")
+            ? "This action needs migration 0013_inclusion_code_moves.sql; run it in the Supabase SQL Editor first."
+            : rpcErr.message
+        );
+        setIncDelete(null);
+        return;
+      }
+    }
+    setIncDelete(null);
+    setIncMigrateTarget("");
+    load();
   }
 
   async function addReason(e: React.FormEvent) {
@@ -1584,6 +1696,8 @@ export default function ScreenClient({
               <p className="mt-2 text-xs text-zinc-400">
                 Codes tag an include decision (I stays plain include).
                 Hotkeys are single letters; digits and I/E/N/U are taken.
+                Deleting a used code asks where its papers go: stay
+                included, move to another code, or back to the queue.
               </p>
             )}
             {incCodesMissing && (
@@ -1605,6 +1719,105 @@ export default function ScreenClient({
           </div>
         </aside>
       </div>
+
+      {/* ------------- Inclusion code delete dialog ------------- */}
+      {incDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+            <h3 className="mb-2 font-semibold text-zinc-900 dark:text-zinc-50">
+              Delete &quot;{incDelete.code.label}&quot;
+            </h3>
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+              {incDelete.affected} include decision(s) across the team carry
+              this code. Where should those papers go?
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => resolveIncDelete("keep")}
+                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              >
+                Keep them included, just drop the code
+              </button>
+              <div className="flex gap-2">
+                <select
+                  value={incMigrateTarget}
+                  onChange={(e) => setIncMigrateTarget(e.target.value)}
+                  className={`${inputCls} h-10 min-w-0 flex-1 py-0`}
+                >
+                  <option value="">Move them to another code...</option>
+                  {incCodes
+                    .filter((x) => x.id !== incDelete.code.id)
+                    .map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.hotkey.toUpperCase()}: {x.label}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  onClick={() => resolveIncDelete("migrate")}
+                  disabled={!incMigrateTarget}
+                  className="rounded-full border border-zinc-300 px-4 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  Move
+                </button>
+              </div>
+              <button
+                onClick={() => resolveIncDelete("reset")}
+                className="rounded-full border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+              >
+                Unmark them: decisions removed, back to the screening queue
+              </button>
+              <button
+                onClick={() => {
+                  setIncDelete(null);
+                  setIncMigrateTarget("");
+                }}
+                className="rounded-full px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Inclusion code edit impact dialog ---------- */}
+      {incEditConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+            <h3 className="mb-2 font-semibold text-zinc-900 dark:text-zinc-50">
+              This code has already been used
+            </h3>
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+              {incEditConfirm.affected} include decision(s) across the team
+              carry this code. If the edit is a small fix (typo, wording),
+              keep them tagged. If the code&apos;s meaning changed, the
+              affected papers should return to the screening queue and be
+              judged again.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => confirmIncEdit(false)}
+                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              >
+                Keep the decisions (small fix)
+              </button>
+              <button
+                onClick={() => confirmIncEdit(true)}
+                className="rounded-full border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+              >
+                Reset them: back to the screening queue
+              </button>
+              <button
+                onClick={() => setIncEditConfirm(null)}
+                className="rounded-full px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---------------- Edit impact dialog ---------------- */}
       {editConfirm && (

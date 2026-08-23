@@ -680,6 +680,27 @@ export default function RecordsClient({
     load();
   }
 
+  async function resetTeamDecisions(r: RecordRow, stage: Stage) {
+    const ok = window.confirm(
+      `Return "${r.title.slice(0, 60)}..." to undecided for EVERY reviewer at this stage? All their decisions here are removed.`
+    );
+    if (!ok) return;
+    const supabase = createClient();
+    const { error: rpcErr } = await supabase.rpc("reset_record_decisions", {
+      p_record: r.id,
+      p_stage: stage,
+    });
+    if (rpcErr) {
+      setError(
+        rpcErr.message.includes("Could not find the function")
+          ? "This action needs migration 0013_inclusion_code_moves.sql; run it in the Supabase SQL Editor first."
+          : rpcErr.message
+      );
+      return;
+    }
+    load();
+  }
+
   function pickPdf(r: RecordRow) {
     uploadTarget.current = r;
     fileRef.current?.click();
@@ -788,7 +809,9 @@ export default function RecordsClient({
 
   const decisionRow = (r: RecordRow, stage: Stage) => {
     const map = stage === "full_text" ? ftDecs : taDecs;
-    const mine = (map.get(r.id) ?? []).find((d) => d.decided_by === userId);
+    const decs = map.get(r.id) ?? [];
+    const mine = decs.find((d) => d.decided_by === userId);
+    const others = decs.some((d) => d.decided_by !== userId);
     const isInc = mine?.decision === "include";
     const isExc = mine?.decision === "exclude";
     return (
@@ -861,9 +884,19 @@ export default function RecordsClient({
         {mine && (
           <button
             onClick={() => clearMyDecision(r, stage)}
-            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+            title="Removes your decision at this stage; the record returns to your queue"
+            className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
-            Clear (back to undecided)
+            Undecided
+          </button>
+        )}
+        {others && (
+          <button
+            onClick={() => resetTeamDecisions(r, stage)}
+            title="Removes EVERY reviewer's decision at this stage; the record returns to the whole team's queues"
+            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+          >
+            reset all reviewers
           </button>
         )}
       </div>
