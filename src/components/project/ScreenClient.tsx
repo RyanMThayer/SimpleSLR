@@ -21,6 +21,33 @@ import type {
 
 const QUEUE_PAGE = 500;
 
+/**
+ * Effective hotkey per exclusion reason: a stored custom key wins;
+ * reasons without one pick up the free digits 1-9 in list order.
+ */
+function reasonKeyMap(reasons: ExclusionReason[]): Map<string, string> {
+  const claimed = new Set(
+    reasons.map((r) => r.hotkey || "").filter(Boolean)
+  );
+  const map = new Map<string, string>();
+  let d = 1;
+  for (const r of reasons) {
+    if (r.hotkey) {
+      map.set(r.id, r.hotkey);
+      continue;
+    }
+    while (d <= 9 && claimed.has(String(d))) d++;
+    if (d <= 9) {
+      map.set(r.id, String(d));
+      claimed.add(String(d));
+      d++;
+    } else {
+      map.set(r.id, "");
+    }
+  }
+  return map;
+}
+
 /** Undecided records in the unassigned pool, counted without paging limits. */
 async function remainingPoolCount(projectId: string, decided: Set<string>) {
   const supabase = createClient();
@@ -202,8 +229,10 @@ export default function ScreenClient({
   // Reason management
   const [manageOpen, setManageOpen] = useState(false);
   const [newReason, setNewReason] = useState("");
+  const [newReasonKey, setNewReasonKey] = useState("");
   const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState("");
+  const [editingReasonKey, setEditingReasonKey] = useState("");
   const [editConfirm, setEditConfirm] = useState<EditConfirm | null>(null);
 
   const load = useCallback(async () => {
@@ -630,13 +659,7 @@ export default function ScreenClient({
       if (editConfirm || incDelete || incEditConfirm) return; // a dialog is open
 
       const k = e.key.toLowerCase();
-      if (/^[1-9]$/.test(e.key)) {
-        const ri = parseInt(e.key, 10) - 1;
-        if (ri < reasons.length) {
-          decide("exclude", reasons[ri].id);
-          e.preventDefault();
-        }
-      } else if (e.key === "ArrowRight") {
+      if (e.key === "ArrowRight") {
         goNext();
         e.preventDefault();
       } else if (e.key === "ArrowLeft") {
@@ -650,7 +673,16 @@ export default function ScreenClient({
         markNoAccess();
       } else if (k === "u") {
         undo();
-      } else {
+      } else if (/^[a-z0-9]$/.test(k)) {
+        // Reason keys (free digits by order plus custom keys), then
+        // inclusion code keys.
+        const keys = reasonKeyMap(reasons);
+        const reason = reasons.find((r) => keys.get(r.id) === k);
+        if (reason) {
+          decide("exclude", reason.id);
+          e.preventDefault();
+          return;
+        }
         const code = incCodes.find((c) => c.hotkey === k);
         if (code) decide("include", null, code.id);
       }
@@ -697,6 +729,17 @@ export default function ScreenClient({
     if (!/^[a-z]$/.test(k)) return null;
     if (["i", "e", "n", "u", "m"].includes(k)) return null;
     if (incCodes.some((c) => c.hotkey === k && c.id !== ignoreId)) return null;
+    if (reasons.some((r) => r.hotkey === k)) return null;
+    return k;
+  }
+
+  /** A reason hotkey may be any free digit or letter. */
+  function validReasonKey(raw: string, ignoreId: string | null): string | null {
+    const k = raw.trim().toLowerCase();
+    if (!/^[a-z0-9]$/.test(k)) return null;
+    if (["i", "e", "n", "u", "m"].includes(k)) return null;
+    if (incCodes.some((c) => c.hotkey === k)) return null;
+    if (reasons.some((r) => r.hotkey === k && r.id !== ignoreId)) return null;
     return k;
   }
 
@@ -875,21 +918,32 @@ export default function ScreenClient({
     e.preventDefault();
     if (!newReason.trim()) return;
     const supabase = createClient();
-    const { data, error: insErr } = await supabase
+    const base = {
+      project_id: project.id,
+      label: newReason.trim(),
+      position: (reasons[reasons.length - 1]?.position ?? 0) + 1,
+    };
+    const hotkey = validReasonKey(newReasonKey, null) ?? "";
+    // Retry without the column for projects that predate migration 0014.
+    let res = await supabase
       .from("exclusion_reasons")
-      .insert({
-        project_id: project.id,
-        label: newReason.trim(),
-        position: (reasons[reasons.length - 1]?.position ?? 0) + 1,
-      })
+      .insert({ ...base, hotkey })
       .select("*")
       .single();
-    if (insErr) {
-      setError(insErr.message);
+    if (res.error && res.error.message.includes("hotkey")) {
+      res = await supabase
+        .from("exclusion_reasons")
+        .insert(base)
+        .select("*")
+        .single();
+    }
+    if (res.error) {
+      setError(res.error.message);
       return;
     }
-    setReasons([...reasons, data as ExclusionReason]);
+    setReasons([...reasons, res.data as ExclusionReason]);
     setNewReason("");
+    setNewReasonKey("");
   }
 
   async function deleteReason(r: ExclusionReason) {
@@ -917,7 +971,29 @@ export default function ScreenClient({
 
   async function requestEditSave(r: ExclusionReason) {
     const newLabel = editingLabel.trim();
-    if (!newLabel || newLabel === r.label) {
+    if (!newLabel) return;
+    // Hotkey changes are cosmetic and save directly, whatever happens
+    // with the label.
+    const newKey = validReasonKey(editingReasonKey, r.id) ?? (r.hotkey || "");
+    if (newKey !== (r.hotkey || "")) {
+      const supabase = createClient();
+      const { error: kErr } = await supabase
+        .from("exclusion_reasons")
+        .update({ hotkey: newKey })
+        .eq("id", r.id);
+      if (kErr) {
+        setError(
+          kErr.message.includes("hotkey")
+            ? "Custom reason hotkeys need migration 0014_reason_hotkeys.sql; run it in the Supabase SQL Editor first."
+            : kErr.message
+        );
+        return;
+      }
+      setReasons((rs) =>
+        rs.map((x) => (x.id === r.id ? { ...x, hotkey: newKey } : x))
+      );
+    }
+    if (newLabel === r.label) {
       setEditingReasonId(null);
       return;
     }
@@ -962,6 +1038,7 @@ export default function ScreenClient({
   }
 
   const pct = mineTotal > 0 ? Math.round((mineDone / mineTotal) * 100) : 0;
+  const rKeys = reasonKeyMap(reasons);
 
   const btn =
     "rounded-full px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50";
@@ -1043,7 +1120,7 @@ export default function ScreenClient({
             )}
           </span>
           <span className="hidden lg:inline">
-            Keys: 1-9 exclude with reason · I include
+            Keys: reason keys exclude · I include
             {stage !== "full_text" ? <> · E exclude</> : <> · N no access</>} ·
             ←/→ skip{reviewing ? null : <> · U undo</>}
             {queue && queue.length > 1 && (
@@ -1487,7 +1564,7 @@ export default function ScreenClient({
             )}
 
             <div className="flex flex-col gap-1">
-              {reasons.map((r, i) => (
+              {reasons.map((r) => (
                 <div key={r.id} className="flex items-center gap-2">
                   {editingReasonId === r.id ? (
                     <form
@@ -1498,7 +1575,14 @@ export default function ScreenClient({
                       className="flex flex-1 items-center gap-2"
                     >
                       <input
-                        className={`${inputCls} h-8 py-0`}
+                        className={keyInputCls}
+                        value={editingReasonKey}
+                        onChange={(e) => setEditingReasonKey(e.target.value)}
+                        maxLength={1}
+                        title="Hotkey: any free digit or letter except I/E/N/U; blank uses the next free digit"
+                      />
+                      <input
+                        className={`${inputCls} h-8 min-w-0 flex-1 py-0`}
                         value={editingLabel}
                         onChange={(e) => setEditingLabel(e.target.value)}
                         autoFocus
@@ -1521,7 +1605,16 @@ export default function ScreenClient({
                         disabled={saving || !current}
                         className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-800 transition-colors hover:bg-red-50 disabled:opacity-50 dark:text-zinc-200 dark:hover:bg-red-950"
                       >
-                        <span className={keyChip}>{i < 9 ? i + 1 : "·"}</span>
+                        <span
+                          className={keyChip}
+                          title={
+                            rKeys.get(r.id)
+                              ? undefined
+                              : "No free key; assign one via manage"
+                          }
+                        >
+                          {(rKeys.get(r.id) || "·").toUpperCase()}
+                        </span>
                         <span className="min-w-0 flex-1">{r.label}</span>
                       </button>
                       {manageOpen && (
@@ -1530,6 +1623,7 @@ export default function ScreenClient({
                             onClick={() => {
                               setEditingReasonId(r.id);
                               setEditingLabel(r.label);
+                              setEditingReasonKey(r.hotkey || "");
                             }}
                             className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                           >
@@ -1552,7 +1646,15 @@ export default function ScreenClient({
             {manageOpen && (
               <form onSubmit={addReason} className="mt-2 flex gap-2">
                 <input
-                  className={`${inputCls} h-8 flex-1 py-0`}
+                  className={keyInputCls}
+                  placeholder="key"
+                  value={newReasonKey}
+                  onChange={(e) => setNewReasonKey(e.target.value)}
+                  maxLength={1}
+                  title="Hotkey: any free digit or letter except I/E/N/U; blank uses the next free digit"
+                />
+                <input
+                  className={`${inputCls} h-8 min-w-0 flex-1 py-0`}
                   placeholder="New exclusion reason"
                   value={newReason}
                   onChange={(e) => setNewReason(e.target.value)}
@@ -1566,10 +1668,10 @@ export default function ScreenClient({
               </form>
             )}
 
-            {reasons.length > 9 && (
+            {reasons.some((r) => !rKeys.get(r.id)) && (
               <p className="mt-2 text-xs text-zinc-400">
-                Keys 1-9 cover the first nine reasons; the rest are click
-                only.
+                Reasons marked · have no key left: the free digits ran out.
+                Give them any free letter (or digit) via manage.
               </p>
             )}
           </div>

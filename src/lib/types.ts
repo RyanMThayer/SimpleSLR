@@ -121,6 +121,8 @@ export type ExclusionReason = {
   id: string;
   project_id: string;
   label: string;
+  /** Custom hotkey; empty means a free digit 1-9 is assigned by order. */
+  hotkey: string;
   position: number;
 };
 
