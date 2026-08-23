@@ -506,6 +506,49 @@ export default function RecordsClient({
     setAbsBusy(false);
   }
 
+  function openAllLinks() {
+    if (!rows || rows.length === 0) return;
+    // Records with a stored PDF need no visit; open only the rest.
+    const needing = rows.filter((r) => !r.fulltext_path);
+    const withPdf = rows.length - needing.length;
+    const links = needing
+      .map((r) => r.url?.trim() || (r.doi ? `https://doi.org/${r.doi}` : null))
+      .filter((x): x is string => Boolean(x));
+    const missing = needing.length - links.length;
+    if (links.length === 0) {
+      setAbsMsg(
+        withPdf > 0 && needing.length === 0
+          ? "Every record in view already has a stored PDF; nothing to open."
+          : "No record in view without a PDF carries a link or DOI."
+      );
+      return;
+    }
+    if (
+      links.length > 15 &&
+      !window.confirm(
+        `Open ${links.length} browser tabs, one per record in the current view that still lacks a PDF?`
+      )
+    )
+      return;
+    let blocked = 0;
+    links.forEach((u) => {
+      const w = window.open(u, "_blank");
+      if (w) w.opener = null;
+      else blocked++;
+    });
+    if (blocked > 0) {
+      setAbsMsg(
+        `Your browser blocked ${blocked} of ${links.length} tabs. Allow pop-ups for this site (the icon in the address bar), then click again. Tip: your browser can move the opened tabs into their own window via right click on a tab.`
+      );
+    } else {
+      setAbsMsg(
+        `Opened ${links.length} link(s) in new tabs${
+          withPdf > 0 ? `; skipped ${withPdf} with a stored PDF` : ""
+        }${missing > 0 ? `; ${missing} without a link or DOI` : ""}.`
+      );
+    }
+  }
+
   async function fetchOaEnrichment() {
     if (absBusy) return;
     setAbsBusy(true);
@@ -1197,6 +1240,14 @@ export default function RecordsClient({
           className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           {absBusy ? "Working..." : "Fetch open access PDFs"}
+        </button>
+        <button
+          onClick={openAllLinks}
+          disabled={!rows || rows.every((r) => Boolean(r.fulltext_path))}
+          title="Opens every record in the current view that has no stored PDF yet in a new browser tab, using its link or DOI. Your browser may ask you to allow pop-ups the first time."
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Open links in tabs ({rows?.filter((r) => !r.fulltext_path).length ?? 0})
         </button>
         <p className="min-w-0 flex-1 text-sm text-zinc-600 dark:text-zinc-300">
           {absMsg ??
