@@ -35,7 +35,16 @@ import type {
 const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | "active" | "duplicate";
-type DecisionFilter = "all" | "include" | "exclude" | "undecided";
+/**
+ * Decision filter: top level category, optionally refined to one
+ * inclusion code / exclusion reason. The string "any" is the sentinel
+ * for "whole category"; null means "without a code/reason".
+ */
+type DecisionFilter =
+  | { kind: "all" }
+  | { kind: "undecided" }
+  | { kind: "include"; codeId: string | null }
+  | { kind: "exclude"; reasonId: string | null };
 
 type SourceSummary = {
   key: string; // database id, or "unlinked"
@@ -77,7 +86,11 @@ export default function RecordsClient({
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("active");
-  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all");
+  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>({
+    kind: "all",
+  });
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [snowLinks, setSnowLinks] = useState<
@@ -180,46 +193,120 @@ export default function RecordsClient({
       }
     }
 
-    let query = supabase
-      .from("records")
-      .select("*", { count: "exact" })
-      .eq("project_id", projectId)
-      .order("created_at")
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-    if (status !== "all") query = query.eq("status", status);
-    if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
-    if (batchIds) query = query.in("batch_id", batchIds);
-
-    const { data, count, error: qErr } = await query;
-    if (qErr) {
-      setError(qErr.message);
-      setRows([]);
-      return;
-    }
-    const records = (data ?? []) as RecordRow[];
-    setError(null);
-    setTotal(count ?? 0);
-
-    const ids = records.map((r) => r.id);
+    let pageRecords: RecordRow[];
     const ta = new Map<string, ScreeningDecision[]>();
     const ft = new Map<string, ScreeningDecision[]>();
-    if (ids.length > 0) {
-      const { data: dec } = await supabase
-        .from("screening_decisions")
-        .select("*")
-        .in("record_id", ids);
-      ((dec ?? []) as ScreeningDecision[]).forEach((d) => {
-        const map = d.stage === "full_text" ? ft : ta;
-        const list = map.get(d.record_id) ?? [];
-        list.push(d);
-        map.set(d.record_id, list);
-      });
+    const addDec = (d: ScreeningDecision) => {
+      const map = d.stage === "full_text" ? ft : ta;
+      const list = map.get(d.record_id) ?? [];
+      list.push(d);
+      map.set(d.record_id, list);
+    };
+
+    if (decisionFilter.kind === "all") {
+      let query = supabase
+        .from("records")
+        .select("*", { count: "exact" })
+        .eq("project_id", projectId)
+        .order("created_at")
+        .range(page * pageSize, page * pageSize + pageSize - 1);
+      if (status !== "all") query = query.eq("status", status);
+      if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+      if (batchIds) query = query.in("batch_id", batchIds);
+
+      const { data, count, error: qErr } = await query;
+      if (qErr) {
+        setError(qErr.message);
+        setRows([]);
+        return;
+      }
+      pageRecords = (data ?? []) as RecordRow[];
+      setTotal(count ?? 0);
+
+      const ids = pageRecords.map((r) => r.id);
+      if (ids.length > 0) {
+        const { data: dec } = await supabase
+          .from("screening_decisions")
+          .select("*")
+          .in("record_id", ids);
+        ((dec ?? []) as ScreeningDecision[]).forEach(addDec);
+      }
+    } else {
+      // A decision filter fetches every matching record and paginates
+      // client side, so filtered pages stay dense instead of showing
+      // whatever happened to fall on the current server page.
+      const all: RecordRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        let query = supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", projectId)
+          .order("created_at")
+          .range(from, from + 999);
+        if (status !== "all") query = query.eq("status", status);
+        if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+        if (batchIds) query = query.in("batch_id", batchIds);
+        const { data, error: qErr } = await query;
+        if (qErr) {
+          setError(qErr.message);
+          setRows([]);
+          return;
+        }
+        all.push(...((data ?? []) as RecordRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      for (let from = 0; ; from += 1000) {
+        const { data: dec, error: dErr } = await supabase
+          .from("screening_decisions")
+          .select("*")
+          .eq("project_id", projectId)
+          .range(from, from + 999);
+        if (dErr) {
+          setError(dErr.message);
+          setRows([]);
+          return;
+        }
+        ((dec ?? []) as ScreeningDecision[]).forEach(addDec);
+        if (!dec || dec.length < 1000) break;
+      }
+
+      const df = decisionFilter;
+      const matches = (r: RecordRow): boolean => {
+        if (df.kind === "undecided") return (ta.get(r.id)?.length ?? 0) === 0;
+        const decs = [...(ta.get(r.id) ?? []), ...(ft.get(r.id) ?? [])];
+        if (df.kind === "include") {
+          return decs.some(
+            (d) =>
+              d.decision === "include" &&
+              (df.codeId === "any"
+                ? true
+                : df.codeId === null
+                  ? !d.inclusion_code_id
+                  : d.inclusion_code_id === df.codeId)
+          );
+        }
+        return decs.some(
+          (d) =>
+            d.decision === "exclude" &&
+            (df.reasonId === "any"
+              ? true
+              : df.reasonId === null
+                ? !d.reason_id
+                : d.reason_id === df.reasonId)
+        );
+      };
+      const filtered = all.filter(matches);
+      setTotal(filtered.length);
+      pageRecords = filtered.slice(page * pageSize, (page + 1) * pageSize);
     }
+
+    setError(null);
     setTaDecs(ta);
     setFtDecs(ft);
 
     // Snowball provenance for the visible page. The query errors before
     // migration 0010; the panel then simply shows nothing.
+    const ids = pageRecords.map((r) => r.id);
     const linkMap = new Map<string, { seedId: string; direction: string }[]>();
     const titleMap = new Map<string, string>();
     if (ids.length > 0) {
@@ -250,19 +337,8 @@ export default function RecordsClient({
     }
     setSnowLinks(linkMap);
     setSeedTitles(titleMap);
-
-    if (decisionFilter === "all") {
-      setRows(records);
-    } else if (decisionFilter === "undecided") {
-      setRows(records.filter((r) => !(ta.get(r.id)?.length ?? 0)));
-    } else {
-      setRows(
-        records.filter((r) =>
-          (ta.get(r.id) ?? []).some((d) => d.decision === decisionFilter)
-        )
-      );
-    }
-  }, [projectId, page, search, status, decisionFilter, sourceFilter, sources]);
+    setRows(pageRecords);
+  }, [projectId, page, pageSize, search, status, decisionFilter, sourceFilter, sources]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside loadSources().
@@ -774,7 +850,49 @@ export default function RecordsClient({
     load();
   }
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const applyFilter = (f: DecisionFilter, close: boolean) => {
+    setDecisionFilter(f);
+    setPage(0);
+    if (close) setFilterOpen(false);
+  };
+
+  const filterItem = (label: string, active: boolean, onClick: () => void) => (
+    <button
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
+        active
+          ? "bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50"
+          : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  const filterLabel = (f: DecisionFilter): string => {
+    switch (f.kind) {
+      case "all":
+        return "Any decision";
+      case "undecided":
+        return "Undecided";
+      case "include":
+        if (f.codeId === "any") return "Included (all)";
+        if (f.codeId === null) return "Included, no code";
+        return `Included: ${
+          inclusionCodes.find((c) => c.id === f.codeId)?.label ?? "removed code"
+        }`;
+      case "exclude": {
+        if (f.reasonId === "any") return "Excluded (all)";
+        if (f.reasonId === null) return "Excluded, no reason";
+        const i = reasons.findIndex((r) => r.id === f.reasonId);
+        return i >= 0
+          ? `Excluded: E${i + 1} ${reasons[i].label}`
+          : "Excluded: removed reason";
+      }
+    }
+  };
   const totalDuplicates = sources?.reduce((s, x) => s + x.duplicates, 0) ?? 0;
 
   const badge = (decision: string) =>
@@ -943,15 +1061,125 @@ export default function RecordsClient({
           <option value="duplicate">Duplicates</option>
           <option value="all">All statuses</option>
         </select>
+        <div className="relative">
+          <button
+            onClick={() => setFilterOpen((o) => !o)}
+            className={`${selectCls} flex max-w-72 items-center gap-1.5`}
+            title="Filter by decision, refined by inclusion code or exclusion reason"
+          >
+            <span className="truncate">{filterLabel(decisionFilter)}</span>
+            <span className="text-zinc-400">▾</span>
+          </button>
+          {filterOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-20"
+                onClick={() => setFilterOpen(false)}
+              />
+              <div className="absolute right-0 z-30 mt-1 flex w-80 flex-col gap-0.5 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                {filterItem(
+                  "Any decision",
+                  decisionFilter.kind === "all",
+                  () => applyFilter({ kind: "all" }, true)
+                )}
+                {filterItem(
+                  "Undecided",
+                  decisionFilter.kind === "undecided",
+                  () => applyFilter({ kind: "undecided" }, true)
+                )}
+                {filterItem(
+                  `Included${inclusionCodes.length > 0 ? " (click again for codes)" : ""}`,
+                  decisionFilter.kind === "include" &&
+                    decisionFilter.codeId === "any",
+                  () =>
+                    applyFilter(
+                      { kind: "include", codeId: "any" },
+                      inclusionCodes.length === 0
+                    )
+                )}
+                {decisionFilter.kind === "include" &&
+                  inclusionCodes.length > 0 && (
+                    <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
+                      {filterItem(
+                        "All included",
+                        decisionFilter.codeId === "any",
+                        () => applyFilter({ kind: "include", codeId: "any" }, true)
+                      )}
+                      {filterItem(
+                        "Include, no code",
+                        decisionFilter.codeId === null,
+                        () => applyFilter({ kind: "include", codeId: null }, true)
+                      )}
+                      {inclusionCodes.map((c) => (
+                        <div key={c.id} className="flex flex-col">
+                          {filterItem(
+                            `${c.hotkey.toUpperCase()} — ${c.label}`,
+                            decisionFilter.codeId === c.id,
+                            () =>
+                              applyFilter(
+                                { kind: "include", codeId: c.id },
+                                true
+                              )
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                {filterItem(
+                  `Excluded${reasons.length > 0 ? " (click again for reasons)" : ""}`,
+                  decisionFilter.kind === "exclude" &&
+                    decisionFilter.reasonId === "any",
+                  () =>
+                    applyFilter(
+                      { kind: "exclude", reasonId: "any" },
+                      reasons.length === 0
+                    )
+                )}
+                {decisionFilter.kind === "exclude" && reasons.length > 0 && (
+                  <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
+                    {filterItem(
+                      "All excluded",
+                      decisionFilter.reasonId === "any",
+                      () => applyFilter({ kind: "exclude", reasonId: "any" }, true)
+                    )}
+                    {filterItem(
+                      "Exclude, no reason",
+                      decisionFilter.reasonId === null,
+                      () => applyFilter({ kind: "exclude", reasonId: null }, true)
+                    )}
+                    {reasons.map((re, i) => (
+                      <div key={re.id} className="flex flex-col">
+                        {filterItem(
+                          `E${i + 1} — ${re.label}`,
+                          decisionFilter.reasonId === re.id,
+                          () =>
+                            applyFilter(
+                              { kind: "exclude", reasonId: re.id },
+                              true
+                            )
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
         <select
           className={selectCls}
-          value={decisionFilter}
-          onChange={(e) => setDecisionFilter(e.target.value as DecisionFilter)}
+          value={pageSize}
+          onChange={(e) => {
+            setPageSize(parseInt(e.target.value, 10));
+            setPage(0);
+          }}
+          title="Records per page"
         >
-          <option value="all">Any decision</option>
-          <option value="include">Included</option>
-          <option value="exclude">Excluded</option>
-          <option value="undecided">Undecided</option>
+          {[50, 100, 150, 200].map((n) => (
+            <option key={n} value={n}>
+              {n} / page
+            </option>
+          ))}
         </select>
       </div>
 
