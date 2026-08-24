@@ -1212,17 +1212,16 @@ export default function RecordsClient({
                   () => applyFilter({ kind: "undecided" }, true)
                 )}
                 {filterItem(
-                  `Included${inclusionCodes.length > 0 ? " (click again for codes)" : ""}`,
+                  "Included (pick stage or code below)",
                   decisionFilter.kind === "include" &&
                     decisionFilter.codeId === "any",
                   () =>
                     applyFilter(
                       { kind: "include", codeId: "any", stage: curStage("include") },
-                      inclusionCodes.length === 0
+                      false
                     )
                 )}
-                {decisionFilter.kind === "include" &&
-                  inclusionCodes.length > 0 && (
+                {decisionFilter.kind === "include" && (
                     <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
                       {stageChipRow("include")}
                       {filterItem(
@@ -1251,16 +1250,16 @@ export default function RecordsClient({
                     </div>
                   )}
                 {filterItem(
-                  `Excluded${reasons.length > 0 ? " (click again for reasons)" : ""}`,
+                  "Excluded (pick stage or reason below)",
                   decisionFilter.kind === "exclude" &&
                     decisionFilter.reasonId === "any",
                   () =>
                     applyFilter(
                       { kind: "exclude", reasonId: "any", stage: curStage("exclude") },
-                      reasons.length === 0
+                      false
                     )
                 )}
-                {decisionFilter.kind === "exclude" && reasons.length > 0 && (
+                {decisionFilter.kind === "exclude" && (
                   <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
                     {stageChipRow("exclude")}
                     {filterItem(

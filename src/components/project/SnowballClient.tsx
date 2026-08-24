@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { outcomeOf } from "@/lib/outcomes";
 import { authorTokens, normalizeDoi, normalizeTitle, sharesAuthor } from "@/lib/normalize";
+import { parseRis } from "@/lib/ris";
+import { parseBibtex } from "@/lib/bibtex";
+import { parseCsv, guessMapping, rowsToRefs } from "@/lib/csv";
 import {
   fetchCiting,
   fetchReferenced,
@@ -58,6 +61,14 @@ export default function SnowballClient({
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Per seed file import (Scopus / WoS references or cited-by exports)
+  const [fileSeed, setFileSeed] = useState<RecordRow | null>(null);
+  const [fiDir, setFiDir] = useState<Direction>("backward");
+  const [fiRefs, setFiRefs] = useState<ParsedRef[] | null>(null);
+  const [fiName, setFiName] = useState("");
+  const [fiError, setFiError] = useState<string | null>(null);
+  const [fiBusy, setFiBusy] = useState(false);
+  const fiInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -216,6 +227,221 @@ export default function SnowballClient({
     setNotes(newNotes);
     setProgress(null);
     setRunning(false);
+  }
+
+  async function onRefFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setFiError(null);
+    setFiRefs(null);
+    setFiName(file.name);
+    const text = await file.text();
+    const lower = file.name.toLowerCase();
+    let refs: ParsedRef[] = [];
+    if (lower.endsWith(".csv") || lower.endsWith(".tsv")) {
+      const rows = parseCsv(
+        lower.endsWith(".tsv") ? text.replace(/\t/g, ",") : text
+      );
+      if (rows.length >= 2) {
+        const guessed = guessMapping(rows[0]);
+        if (guessed.title === null) {
+          setFiError(
+            "Could not find a title column in this CSV automatically; export RIS instead."
+          );
+          return;
+        }
+        refs = rowsToRefs(rows.slice(1), guessed);
+      }
+    } else if (lower.endsWith(".bib") || lower.endsWith(".bibtex")) {
+      refs = parseBibtex(text);
+    } else {
+      refs = parseRis(text);
+    }
+    if (refs.length === 0) {
+      setFiError(
+        "No records found. Expected a RIS, BibTeX, or CSV export from the database."
+      );
+      return;
+    }
+    setFiRefs(refs);
+  }
+
+  /**
+   * Import a references (backward) or cited-by (forward) file export
+   * for one seed. Same pipeline as OpenAlex candidates: origin tagged
+   * batch, per seed provenance links, corroborated dedup, abstract
+   * plausibility guard, automatic enrichment.
+   */
+  async function importFileRefs() {
+    const seed = fileSeed;
+    if (!seed || !fiRefs || fiRefs.length === 0 || fiBusy) return;
+    setFiBusy(true);
+    setError(null);
+    const supabase = createClient();
+    const stamp = new Date().toISOString().slice(0, 10);
+    const origin =
+      fiDir === "backward" ? "snowball_backward" : "snowball_forward";
+    const { data: batch, error: bErr } = await supabase
+      .from("import_batches")
+      .insert({
+        project_id: projectId,
+        source_label: `Snowball ${fiDir} file ${stamp}`,
+        filename: fiName,
+        imported_by: userId,
+        origin,
+        seed_record_id: seed.id,
+      })
+      .select("id")
+      .single();
+    if (bErr || !batch) {
+      setError(bErr?.message ?? "Could not create the import batch.");
+      setFiBusy(false);
+      return;
+    }
+
+    type TitleInfo = { tokens: Set<string>; year: number | null };
+    const existingDois = new Set<string>();
+    const titleMap = new Map<string, TitleInfo[]>();
+    corpus.forEach((k) => {
+      if (k.norm_doi) existingDois.add(k.norm_doi);
+      if (k.norm_title) {
+        const list = titleMap.get(k.norm_title) ?? [];
+        list.push({ tokens: authorTokens(k.authors), year: k.year });
+        titleMap.set(k.norm_title, list);
+      }
+    });
+
+    let imported = 0;
+    let duplicates = 0;
+    let linksMissing = false;
+    const rows = fiRefs.map((ref) => {
+      const norm_doi = normalizeDoi(ref.doi);
+      const norm_title = normalizeTitle(ref.title);
+      const info = { tokens: authorTokens(ref.authors), year: ref.year };
+      const titleDup = (titleMap.get(norm_title) ?? []).some((t) =>
+        t.tokens.size > 0 && info.tokens.size > 0
+          ? sharesAuthor(t.tokens, info.tokens)
+          : t.year !== null && info.year !== null && t.year === info.year
+      );
+      const isDup =
+        (norm_doi !== null && existingDois.has(norm_doi)) || titleDup;
+      if (norm_doi) existingDois.add(norm_doi);
+      if (norm_title) {
+        const list = titleMap.get(norm_title) ?? [];
+        list.push(info);
+        titleMap.set(norm_title, list);
+      }
+      if (isDup) duplicates++;
+      else imported++;
+      return {
+        project_id: projectId,
+        batch_id: batch.id,
+        title: ref.title,
+        authors: ref.authors,
+        year: ref.year,
+        venue: ref.venue,
+        abstract: plausibleAbstract(ref.abstract) ? ref.abstract : null,
+        doi: ref.doi,
+        url: ref.url,
+        source_label: `Snowball ${fiDir}`,
+        status: isDup ? "duplicate" : "active",
+        norm_doi,
+        norm_title,
+      };
+    });
+    const newActive: {
+      id: string;
+      title: string;
+      abstract: string | null;
+      doi: string | null;
+      norm_doi: string | null;
+      norm_title: string | null;
+    }[] = [];
+    for (let i = 0; i < rows.length; i += 200) {
+      const { data: inserted, error: insErr } = await supabase
+        .from("records")
+        .insert(rows.slice(i, i + 200))
+        .select("id");
+      if (insErr) {
+        setError(insErr.message);
+        setFiBusy(false);
+        return;
+      }
+      (inserted ?? []).forEach((row, j) => {
+        const src = rows[i + j];
+        if (!src || src.status !== "active") return;
+        newActive.push({
+          id: row.id,
+          title: src.title,
+          abstract: src.abstract,
+          doi: src.doi,
+          norm_doi: src.norm_doi,
+          norm_title: src.norm_title,
+        });
+      });
+      const linkRows = (inserted ?? []).map((row) => ({
+        project_id: projectId,
+        record_id: row.id,
+        seed_record_id: seed.id,
+        direction: fiDir,
+      }));
+      if (linkRows.length > 0) {
+        const { error: lkErr } = await supabase
+          .from("snowball_links")
+          .insert(linkRows);
+        if (lkErr && lkErr.message.includes("does not exist")) {
+          linksMissing = true;
+        } else if (lkErr) {
+          setError(lkErr.message);
+        }
+      }
+    }
+    await supabase
+      .from("import_batches")
+      .update({ record_count: rows.length })
+      .eq("id", batch.id);
+    await supabase
+      .from("import_batches")
+      .update({ raw_hit_count: fiRefs.length })
+      .eq("id", batch.id);
+
+    let absNote = "";
+    const missingAbs = newActive.filter((r) => !plausibleAbstract(r.abstract));
+    if (missingAbs.length > 0) {
+      try {
+        setProgress("Fetching missing abstracts for the imported records...");
+        const { updates } = await findMissingAbstracts(newActive, setProgress);
+        for (let i = 0; i < updates.length; i += 20) {
+          await Promise.all(
+            updates
+              .slice(i, i + 20)
+              .map((u) =>
+                supabase
+                  .from("records")
+                  .update({ abstract: u.abstract })
+                  .eq("id", u.recordId)
+              )
+          );
+        }
+        absNote = ` Abstracts: filled ${updates.length} of ${missingAbs.length} missing automatically.`;
+      } catch {
+        absNote = "";
+      }
+      setProgress(null);
+    }
+
+    setFiBusy(false);
+    setFileSeed(null);
+    setFiRefs(null);
+    setResult(
+      `Imported ${imported + duplicates} record(s) from ${fiName} as ${fiDir} snowballing from "${seed.title.slice(0, 50)}": ${imported} new, ${duplicates} marked as duplicates. They join title/abstract screening as usual.${
+        linksMissing
+          ? " (Per seed provenance was not recorded: run supabase/migrations/0010_snowball_links.sql.)"
+          : ""
+      }${absNote}`
+    );
+    load();
   }
 
   async function importSelected() {
@@ -446,6 +672,13 @@ export default function SnowballClient({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
+      <input
+        type="file"
+        accept=".ris,.txt,.bib,.bibtex,.csv,.tsv"
+        ref={fiInputRef}
+        className="hidden"
+        onChange={onRefFilePicked}
+      />
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Snowballing
       </h1>
@@ -514,6 +747,21 @@ export default function SnowballClient({
                 />
                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
                 <span className="shrink-0 text-xs text-zinc-400">{s.year ?? ""}</span>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setFileSeed(s);
+                    setFiDir("backward");
+                    setFiRefs(null);
+                    setFiName("");
+                    setFiError(null);
+                  }}
+                  title="Import this paper's references or cited-by list from a Scopus / Web of Science file export"
+                  className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                >
+                  file import
+                </button>
               </label>
             ))}
           </div>
@@ -689,6 +937,85 @@ export default function SnowballClient({
             {importing ? (progress ?? "Importing...") : `Import ${selectedCount} selected`}
           </button>
         </section>
+      )}
+
+      {/* ------------- Per seed file import dialog ------------- */}
+      {fileSeed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+            <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+              Import references or citations from a file
+            </h3>
+            <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+              For: <span className="font-medium">{fileSeed.title}</span>
+            </p>
+            <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">
+              In Scopus or Web of Science, open this paper, use its
+              References list (backward) or Cited by list (forward), select
+              all, and export as RIS including abstracts. Then choose that
+              file here; the records enter the normal snowball pipeline
+              with this paper recorded as their seed.
+            </p>
+            <div className="mb-3 flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  checked={fiDir === "backward"}
+                  onChange={() => setFiDir("backward")}
+                />
+                References of this paper (backward)
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  checked={fiDir === "forward"}
+                  onChange={() => setFiDir("forward")}
+                />
+                Papers citing this paper (forward)
+              </label>
+            </div>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => fiInputRef.current?.click()}
+                className={ghostBtn}
+              >
+                Choose file (RIS, BibTeX, CSV)
+              </button>
+              {fiName && (
+                <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                  {fiName}
+                  {fiRefs ? ` · ${fiRefs.length} record(s) parsed` : ""}
+                </span>
+              )}
+            </div>
+            {fiError && (
+              <p className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                {fiError}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={importFileRefs}
+                disabled={!fiRefs || fiRefs.length === 0 || fiBusy}
+                className={primaryBtn}
+              >
+                {fiBusy
+                  ? (progress ?? "Importing...")
+                  : `Import ${fiRefs?.length ?? 0} as ${fiDir}`}
+              </button>
+              <button
+                onClick={() => {
+                  setFileSeed(null);
+                  setFiRefs(null);
+                }}
+                disabled={fiBusy}
+                className={ghostBtn}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );
