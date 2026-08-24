@@ -1148,7 +1148,7 @@ export default function RecordsClient({
       />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="mr-auto text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Records <span className="text-base font-normal text-zinc-400">({total})</span>
+          Records
         </h1>
         <input
           className="h-9 w-64 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
@@ -1291,21 +1291,6 @@ export default function RecordsClient({
             </>
           )}
         </div>
-        <select
-          className={selectCls}
-          value={pageSize}
-          onChange={(e) => {
-            setPageSize(parseInt(e.target.value, 10));
-            setPage(0);
-          }}
-          title="Records per page"
-        >
-          {[50, 100, 150, 200].map((n) => (
-            <option key={n} value={n}>
-              {n} / page
-            </option>
-          ))}
-        </select>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
@@ -1401,13 +1386,41 @@ export default function RecordsClient({
         </p>
       )}
 
-      <BulkPdfUpload
-        projectId={projectId}
-        onDone={() => {
-          loadSources();
-          load();
-        }}
-      />
+      {/* Toolbar directly above the list: bulk upload on the left, the
+          visible record count and page size on the right. */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <BulkPdfUpload
+          projectId={projectId}
+          onDone={() => {
+            loadSources();
+            load();
+          }}
+        />
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-sm text-zinc-600 dark:text-zinc-300">
+            {total === 0
+              ? "No records"
+              : total <= pageSize
+                ? `${total} record${total === 1 ? "" : "s"}`
+                : `Showing ${page * pageSize + 1}–${Math.min(total, (page + 1) * pageSize)} of ${total} records`}
+          </span>
+          <select
+            className={selectCls}
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(parseInt(e.target.value, 10));
+              setPage(0);
+            }}
+            title="Records per page"
+          >
+            {[50, 100, 150, 200].map((n) => (
+              <option key={n} value={n}>
+                {n} / page
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         {rows === null ? (

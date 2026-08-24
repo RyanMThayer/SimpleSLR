@@ -160,24 +160,25 @@ export default function BulkPdfUpload({
   const card =
     "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
+  // Margins and placement are the parent's concern: the collapsed
+  // button sits inline in the records toolbar, the open card spans the
+  // full row.
   if (!open) {
     return (
-      <div className="mb-4">
-        <button
-          onClick={() => {
-            setOpen(true);
-            loadCandidates();
-          }}
-          className="rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          Bulk PDF upload
-        </button>
-      </div>
+      <button
+        onClick={() => {
+          setOpen(true);
+          loadCandidates();
+        }}
+        className="rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Bulk PDF upload
+      </button>
     );
   }
 
   return (
-    <div className={`${card} mb-4`}>
+    <div className={`${card} w-full`}>
       <input
         type="file"
         accept="application/pdf,.pdf"
