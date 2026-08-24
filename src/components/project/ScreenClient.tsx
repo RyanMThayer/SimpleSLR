@@ -218,6 +218,22 @@ export default function ScreenClient({
   const [pdfExpanded, setPdfExpanded] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const pdfFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  // The embedded PDF viewer grabs keyboard focus while it initializes,
+  // which silently swallows the screening hotkeys until the user clicks
+  // outside it. Right after each load, take focus back (checked a few
+  // times because the viewer focuses asynchronously). A deliberate
+  // click into the PDF later is still respected.
+  function reclaimFocusFromPdf() {
+    [0, 120, 400].forEach((ms) =>
+      window.setTimeout(() => {
+        if (document.activeElement === pdfFrameRef.current) {
+          pdfFrameRef.current?.blur();
+        }
+      }, ms)
+    );
+  }
 
   // Criteria panel
   const [criteriaOpen, setCriteriaOpen] = useState(true);
@@ -1386,6 +1402,8 @@ export default function ScreenClient({
                 {stage === "full_text" &&
                   (pdfUrl ? (
                     <iframe
+                      ref={pdfFrameRef}
+                      onLoad={reclaimFocusFromPdf}
                       src={`${pdfUrl}#view=FitH&navpanes=0`}
                       title="Full text PDF"
                       className="mt-3 h-[78vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"

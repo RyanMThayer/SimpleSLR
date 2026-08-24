@@ -248,23 +248,52 @@ type Box = {
   lines: string[];
   /** Render as a column header: shaded, centered, no border. */
   header?: boolean;
+  /** Rotated stage band label (Identification / Screening / Included). */
+  vertical?: boolean;
 };
 
-type Diagram = { boxes: Box[]; arrows: string[]; width: number; height: number };
+/** Polyline points; the arrowhead sits on the final point. */
+type Arrow = [number, number][];
+
+type Diagram = { boxes: Box[]; arrows: Arrow[]; width: number; height: number };
 
 const LINE = 16;
 const PAD = 10;
 const GAP = 26;
+const LANE_X = 14;
+const LANE_W = 26;
+
+function wrapLine(line: string, maxChars: number): string[] {
+  if (line.length <= maxChars) return [line];
+  const words = line.split(" ");
+  const out: string[] = [];
+  let cur = "";
+  for (const word of words) {
+    if (cur && (cur + " " + word).length > maxChars) {
+      out.push(cur);
+      cur = word;
+    } else {
+      cur = cur ? `${cur} ${word}` : word;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 
 function mkBox(x: number, w: number, lines: string[]): Omit<Box, "y"> {
-  return { x, w, h: lines.length * LINE + PAD * 2, lines };
+  // Word-wrap to the box width so long reason labels or source names
+  // can never spill into a neighboring column.
+  const maxChars = Math.max(12, Math.floor((w - PAD * 2) / 6.6));
+  const wrapped = lines.flatMap((l) => wrapLine(l, maxChars));
+  return { x, w, h: wrapped.length * LINE + PAD * 2, lines: wrapped };
 }
 
 function reasonLines(arm: ArmCounts): string[] {
   const lines = arm.ftExcludedByReason
-    .slice(0, 8)
+    .slice(0, 12)
     .map((r) => `${r.label} (n = ${r.count})`);
-  return lines.length ? lines : ["(no full text exclusions yet)"];
+  if (arm.ftExcludedByReason.length > 12) lines.push("and more reasons");
+  return lines.length ? lines : ["(none yet)"];
 }
 
 function sourceLines(c: Counts): string[] {
@@ -274,283 +303,283 @@ function sourceLines(c: Counts): string[] {
   return lines;
 }
 
+/**
+ * Row engine: each row is placed with a height that accounts for EVERY
+ * box in it (side boxes included), so nothing can overlap; boxes are
+ * vertically centered within their row.
+ */
+type RowBoxes = Omit<Box, "y">[];
+
+function placeRows(
+  rows: RowBoxes[],
+  startY: number
+): { placed: Box[][]; y: number } {
+  const placed: Box[][] = [];
+  let y = startY;
+  for (const row of rows) {
+    const rowH = Math.max(...row.map((b) => b.h));
+    placed.push(row.map((b) => ({ ...b, y: y + (rowH - b.h) / 2 })));
+    y += rowH + GAP;
+  }
+  return { placed, y };
+}
+
+function midX(b: Box): number {
+  return b.x + b.w / 2;
+}
+
+/** Vertical stage bands on the far left, PRISMA 2020 style. */
+function stageBands(
+  identTop: number,
+  identBottom: number,
+  screenBottom: number,
+  inclBottom: number
+): Box[] {
+  const mk = (label: string, top: number, bottom: number): Box => ({
+    x: LANE_X,
+    y: top,
+    w: LANE_W,
+    h: bottom - top,
+    lines: [label],
+    header: true,
+    vertical: true,
+  });
+  return [
+    mk("Identification", identTop, identBottom),
+    mk("Screening", identBottom + 8, screenBottom),
+    mk("Included", screenBottom + 8, inclBottom),
+  ];
+}
+
 function layoutDiagram(c: Counts): Diagram {
   return c.other.identified > 0 ? layoutTwoArms(c) : layoutSingleArm(c);
 }
 
-/** Classic single column layout, used while no snowballing has happened. */
+/** PRISMA 2020, databases and registers only. */
 function layoutSingleArm(c: Counts): Diagram {
-  const MAIN_X = 30;
+  const MAIN_X = LANE_X + LANE_W + 14;
   const MAIN_W = 330;
-  const SIDE_X = 410;
+  const SIDE_X = MAIN_X + MAIN_W + 50;
   const SIDE_W = 300;
+  const width = SIDE_X + SIDE_W + 20;
 
-  const identify = mkBox(MAIN_X, MAIN_W, [
-    "Records identified from databases",
-    `(n = ${c.identified})`,
-    ...sourceLines(c),
-  ]);
-  const dupBox = mkBox(SIDE_X, SIDE_W, [
-    "Duplicate records removed",
-    `(n = ${c.duplicates})`,
-  ]);
-  const screened = mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.screened})`]);
-  const taExc = mkBox(SIDE_X, SIDE_W, [
-    "Records excluded at title/abstract",
-    `(n = ${c.taExcluded})`,
-  ]);
-  const sought = mkBox(MAIN_X, MAIN_W, [
-    "Reports sought for retrieval",
-    `(n = ${c.taIncluded})`,
-  ]);
-  const notRet = mkBox(SIDE_X, SIDE_W, [
-    "Reports not retrieved",
-    `(n = ${c.notRetrieved})`,
-  ]);
-  const assessed = mkBox(MAIN_X, MAIN_W, [
-    "Reports assessed for eligibility",
-    `(n = ${c.assessed})`,
-  ]);
-  const ftExc = mkBox(SIDE_X, SIDE_W, [
-    `Reports excluded (n = ${c.ftExcluded}):`,
-    ...reasonLines(c.db),
-  ]);
-  const included = mkBox(MAIN_X, MAIN_W, [
-    "Studies included in review",
-    `(n = ${c.ftIncluded})`,
-  ]);
+  const HEAD_H = 30;
+  const headerTop = 16;
+  const header: Box = {
+    x: MAIN_X,
+    y: headerTop,
+    w: SIDE_X + SIDE_W - MAIN_X,
+    h: HEAD_H,
+    lines: ["Identification of studies via databases and registers"],
+    header: true,
+  };
 
-  let y = 20;
-  const identifyB: Box = { ...identify, y };
-  y += identify.h + GAP;
-  const screenedB: Box = { ...screened, y };
-  y += screened.h + GAP;
-  const soughtB: Box = { ...sought, y };
-  y += sought.h + GAP;
-  const assessedB: Box = { ...assessed, y };
-  y += assessed.h + GAP;
-  const includedB: Box = { ...included, y };
-  const height = y + included.h + 20;
-
-  const dupB: Box = { ...dupBox, y: identifyB.y + (identifyB.h - dupBox.h) / 2 };
-  const taExcB: Box = { ...taExc, y: screenedB.y + (screenedB.h - taExc.h) / 2 };
-  const notRetB: Box = { ...notRet, y: soughtB.y + (soughtB.h - notRet.h) / 2 };
-  const ftExcB: Box = { ...ftExc, y: assessedB.y + (assessedB.h - ftExc.h) / 2 };
-
-  const midMain = MAIN_X + MAIN_W / 2;
-  const arrows = [
-    `M ${midMain} ${identifyB.y + identifyB.h} L ${midMain} ${screenedB.y}`,
-    `M ${midMain} ${screenedB.y + screenedB.h} L ${midMain} ${soughtB.y}`,
-    `M ${midMain} ${soughtB.y + soughtB.h} L ${midMain} ${assessedB.y}`,
-    `M ${midMain} ${assessedB.y + assessedB.h} L ${midMain} ${includedB.y}`,
-    `M ${MAIN_X + MAIN_W} ${dupB.y + dupB.h / 2} L ${SIDE_X} ${dupB.y + dupB.h / 2}`,
-    `M ${MAIN_X + MAIN_W} ${taExcB.y + taExcB.h / 2} L ${SIDE_X} ${taExcB.y + taExcB.h / 2}`,
-    `M ${MAIN_X + MAIN_W} ${notRetB.y + notRetB.h / 2} L ${SIDE_X} ${notRetB.y + notRetB.h / 2}`,
-    `M ${MAIN_X + MAIN_W} ${ftExcB.y + ftExcB.h / 2} L ${SIDE_X} ${ftExcB.y + ftExcB.h / 2}`,
+  const rows: RowBoxes[] = [
+    [
+      mkBox(MAIN_X, MAIN_W, [
+        "Records identified from:",
+        `Databases (n = ${c.db.identified})`,
+        ...sourceLines(c),
+      ]),
+      mkBox(SIDE_X, SIDE_W, [
+        "Records removed before screening:",
+        `Duplicate records removed (n = ${c.db.duplicates})`,
+      ]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.db.screened})`]),
+      mkBox(SIDE_X, SIDE_W, [`Records excluded (n = ${c.db.taExcluded})`]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, ["Reports sought for retrieval", `(n = ${c.db.sought})`]),
+      mkBox(SIDE_X, SIDE_W, ["Reports not retrieved", `(n = ${c.db.notRetrieved})`]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, ["Reports assessed for eligibility", `(n = ${c.db.assessed})`]),
+      mkBox(SIDE_X, SIDE_W, ["Reports excluded:", ...reasonLines(c.db)]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, [
+        `Studies included in review (n = ${c.db.ftIncluded})`,
+        `Reports of included studies (n = ${c.db.ftIncluded})`,
+      ]),
+    ],
   ];
+  const { placed, y } = placeRows(rows, headerTop + HEAD_H + 18);
+  const height = y - GAP + 20;
+
+  const mains = placed.map((row) => row[0]);
+  const arrows: Arrow[] = [];
+  for (let i = 0; i < mains.length - 1; i++) {
+    arrows.push([
+      [midX(mains[i]), mains[i].y + mains[i].h],
+      [midX(mains[i + 1]), mains[i + 1].y],
+    ]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const side = placed[i][1];
+    arrows.push([
+      [MAIN_X + MAIN_W, side.y + side.h / 2],
+      [side.x, side.y + side.h / 2],
+    ]);
+  }
+
+  const bands = stageBands(
+    headerTop,
+    Math.max(...placed[0].map((b) => b.y + b.h)),
+    placed[4][0].y - GAP / 2,
+    height - 20
+  );
 
   return {
-    boxes: [
-      identifyB,
-      dupB,
-      screenedB,
-      taExcB,
-      soughtB,
-      notRetB,
-      assessedB,
-      ftExcB,
-      includedB,
-    ],
+    boxes: [header, ...bands, ...placed.flat()],
     arrows,
-    width: 740,
+    width,
     height,
   };
 }
 
 /**
- * PRISMA 2020 two column layout: identification via databases on the
- * left, via other methods (snowballing) on the right, meeting in the
- * shared "Studies included" box at the bottom. The right arm carries a
- * "Records screened" box, an addition the guideline permits, because
- * SimpleSLR formally screens snowball records at title/abstract.
+ * PRISMA 2020 two column template: databases and registers on the
+ * left, other methods (citation searching) on the right. Per the
+ * template, the other methods column has no screening or duplicate
+ * boxes: identified records go straight to retrieval.
  */
 function layoutTwoArms(c: Counts): Diagram {
-  const MAIN_X = 20;
+  const MAIN_X = LANE_X + LANE_W + 14;
   const MAIN_W = 300;
-  const S1_X = 336;
+  const S1_X = MAIN_X + MAIN_W + 36;
   const S1_W = 240;
-  const OTH_X = 612;
+  const OTH_X = S1_X + S1_W + 36;
   const OTH_W = 300;
-  const S2_X = 928;
+  const S2_X = OTH_X + OTH_W + 36;
   const S2_W = 240;
   const width = S2_X + S2_W + 20;
 
-  const dirLines: string[] = [];
-  if (c.other.backward > 0) dirLines.push(`Backward (n = ${c.other.backward})`);
-  if (c.other.forward > 0) dirLines.push(`Forward (n = ${c.other.forward})`);
-
-  const rows: {
-    main: Omit<Box, "y">;
-    oth: Omit<Box, "y">;
-    side1: Omit<Box, "y"> | null;
-    side2: Omit<Box, "y"> | null;
-  }[] = [
+  const HEAD_H = 30;
+  const headerTop = 16;
+  const headers: Box[] = [
     {
-      main: mkBox(MAIN_X, MAIN_W, [
-        "Records identified from databases",
-        `(n = ${c.db.identified})`,
-        ...sourceLines(c),
-      ]),
-      oth: mkBox(OTH_X, OTH_W, [
-        "Records identified via snowballing",
-        `(n = ${c.other.identified})`,
-        ...dirLines,
-      ]),
-      side1: mkBox(S1_X, S1_W, [
-        "Duplicate records removed",
-        `(n = ${c.db.duplicates})`,
-      ]),
-      side2:
-        c.other.duplicates > 0
-          ? mkBox(S2_X, S2_W, [
-              "Duplicate records removed",
-              `(n = ${c.other.duplicates})`,
-            ])
-          : null,
+      x: MAIN_X,
+      y: headerTop,
+      w: S1_X + S1_W - MAIN_X,
+      h: HEAD_H,
+      lines: ["Identification of studies via databases and registers"],
+      header: true,
     },
     {
-      main: mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.db.screened})`]),
-      oth: mkBox(OTH_X, OTH_W, [`Records screened (n = ${c.other.screened})`]),
-      side1: mkBox(S1_X, S1_W, [
-        "Records excluded at title/abstract",
-        `(n = ${c.db.taExcluded})`,
-      ]),
-      side2: mkBox(S2_X, S2_W, [
-        "Records excluded at title/abstract",
-        `(n = ${c.other.taExcluded})`,
-      ]),
-    },
-    {
-      main: mkBox(MAIN_X, MAIN_W, [
-        "Reports sought for retrieval",
-        `(n = ${c.db.sought})`,
-      ]),
-      oth: mkBox(OTH_X, OTH_W, [
-        "Reports sought for retrieval",
-        `(n = ${c.other.sought})`,
-      ]),
-      side1: mkBox(S1_X, S1_W, [
-        "Reports not retrieved",
-        `(n = ${c.db.notRetrieved})`,
-      ]),
-      side2: mkBox(S2_X, S2_W, [
-        "Reports not retrieved",
-        `(n = ${c.other.notRetrieved})`,
-      ]),
-    },
-    {
-      main: mkBox(MAIN_X, MAIN_W, [
-        "Reports assessed for eligibility",
-        `(n = ${c.db.assessed})`,
-      ]),
-      oth: mkBox(OTH_X, OTH_W, [
-        "Reports assessed for eligibility",
-        `(n = ${c.other.assessed})`,
-      ]),
-      side1: mkBox(S1_X, S1_W, [
-        `Reports excluded (n = ${c.db.ftExcluded}):`,
-        ...reasonLines(c.db),
-      ]),
-      side2: mkBox(S2_X, S2_W, [
-        `Reports excluded (n = ${c.other.ftExcluded}):`,
-        ...reasonLines(c.other),
-      ]),
+      x: OTH_X,
+      y: headerTop,
+      w: S2_X + S2_W - OTH_X,
+      h: HEAD_H,
+      lines: ["Identification of studies via other methods"],
+      header: true,
     },
   ];
 
-  const boxes: Box[] = [];
-  const arrows: string[] = [];
-  const HEAD_H = 30;
-  let y = 16;
-  boxes.push({
-    x: MAIN_X,
-    y,
-    w: S1_X + S1_W - MAIN_X,
-    h: HEAD_H,
-    lines: ["Identification of studies via databases"],
-    header: true,
-  });
-  boxes.push({
-    x: OTH_X,
-    y,
-    w: S2_X + S2_W - OTH_X,
-    h: HEAD_H,
-    lines: ["Identification of studies via snowballing"],
-    header: true,
-  });
-  y += HEAD_H + 18;
+  // Row composition; positions in each row are found by x lane below.
+  const rows: RowBoxes[] = [
+    [
+      mkBox(MAIN_X, MAIN_W, [
+        "Records identified from:",
+        `Databases (n = ${c.db.identified})`,
+        ...sourceLines(c),
+      ]),
+      mkBox(S1_X, S1_W, [
+        "Records removed before screening:",
+        `Duplicate records removed (n = ${c.db.duplicates})`,
+      ]),
+      mkBox(OTH_X, OTH_W, [
+        "Records identified from:",
+        `Citation searching (n = ${c.other.identified})`,
+      ]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, [`Records screened (n = ${c.db.screened})`]),
+      mkBox(S1_X, S1_W, [`Records excluded (n = ${c.db.taExcluded})`]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, ["Reports sought for retrieval", `(n = ${c.db.sought})`]),
+      mkBox(S1_X, S1_W, ["Reports not retrieved", `(n = ${c.db.notRetrieved})`]),
+      mkBox(OTH_X, OTH_W, ["Reports sought for retrieval", `(n = ${c.other.sought})`]),
+      mkBox(S2_X, S2_W, ["Reports not retrieved", `(n = ${c.other.notRetrieved})`]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, ["Reports assessed for eligibility", `(n = ${c.db.assessed})`]),
+      mkBox(S1_X, S1_W, ["Reports excluded:", ...reasonLines(c.db)]),
+      mkBox(OTH_X, OTH_W, ["Reports assessed for eligibility", `(n = ${c.other.assessed})`]),
+      mkBox(S2_X, S2_W, ["Reports excluded:", ...reasonLines(c.other)]),
+    ],
+    [
+      mkBox(MAIN_X, MAIN_W, [
+        `Studies included in review (n = ${c.db.ftIncluded + c.other.ftIncluded})`,
+        `Reports of included studies (n = ${c.db.ftIncluded + c.other.ftIncluded})`,
+      ]),
+    ],
+  ];
+  const { placed, y } = placeRows(rows, headerTop + HEAD_H + 18);
+  const height = y - GAP + 20;
 
-  const mainMid = MAIN_X + MAIN_W / 2;
-  const othMid = OTH_X + OTH_W / 2;
-  const placed: { main: Box; oth: Box }[] = [];
-  for (const row of rows) {
-    const rowH = Math.max(
-      row.main.h,
-      row.oth.h,
-      row.side1?.h ?? 0,
-      row.side2?.h ?? 0
-    );
-    const center = (b: Omit<Box, "y">): Box => ({
-      ...b,
-      y: y + (rowH - b.h) / 2,
-    });
-    const mainB = center(row.main);
-    const othB = center(row.oth);
-    boxes.push(mainB, othB);
-    if (row.side1) {
-      const s = center(row.side1);
-      boxes.push(s);
-      arrows.push(
-        `M ${MAIN_X + MAIN_W} ${s.y + s.h / 2} L ${S1_X} ${s.y + s.h / 2}`
-      );
+  const at = (row: number, x: number): Box | undefined =>
+    placed[row].find((b) => b.x === x);
+  const arrows: Arrow[] = [];
+  const chain = (boxes: (Box | undefined)[]) => {
+    for (let i = 0; i < boxes.length - 1; i++) {
+      const a = boxes[i];
+      const b = boxes[i + 1];
+      if (a && b) {
+        arrows.push([
+          [midX(a), a.y + a.h],
+          [midX(b), b.y],
+        ]);
+      }
     }
-    if (row.side2) {
-      const s = center(row.side2);
-      boxes.push(s);
-      arrows.push(
-        `M ${OTH_X + OTH_W} ${s.y + s.h / 2} L ${S2_X} ${s.y + s.h / 2}`
-      );
+  };
+  chain([at(0, MAIN_X), at(1, MAIN_X), at(2, MAIN_X), at(3, MAIN_X), at(4, MAIN_X)]);
+  chain([at(0, OTH_X), at(2, OTH_X), at(3, OTH_X)]);
+  const sidePairs: [number, number, number][] = [
+    [0, MAIN_X + MAIN_W, S1_X],
+    [1, MAIN_X + MAIN_W, S1_X],
+    [2, MAIN_X + MAIN_W, S1_X],
+    [3, MAIN_X + MAIN_W, S1_X],
+    [2, OTH_X + OTH_W, S2_X],
+    [3, OTH_X + OTH_W, S2_X],
+  ];
+  for (const [row, fromX, toX] of sidePairs) {
+    const side = placed[row].find((b) => b.x === toX);
+    if (side) {
+      arrows.push([
+        [fromX, side.y + side.h / 2],
+        [toX, side.y + side.h / 2],
+      ]);
     }
-    placed.push({ main: mainB, oth: othB });
-    y += rowH + GAP;
   }
-  for (let i = 0; i < placed.length - 1; i++) {
-    arrows.push(
-      `M ${mainMid} ${placed[i].main.y + placed[i].main.h} L ${mainMid} ${placed[i + 1].main.y}`
-    );
-    arrows.push(
-      `M ${othMid} ${placed[i].oth.y + placed[i].oth.h} L ${othMid} ${placed[i + 1].oth.y}`
-    );
+  // The other methods arm merges into the shared included box.
+  const othAssessed = at(3, OTH_X);
+  const included = at(4, MAIN_X);
+  if (othAssessed && included) {
+    const incMidY = included.y + included.h / 2;
+    arrows.push([
+      [midX(othAssessed), othAssessed.y + othAssessed.h],
+      [midX(othAssessed), incMidY],
+      [included.x + included.w, incMidY],
+    ]);
   }
 
-  const included = mkBox(MAIN_X, MAIN_W, [
-    "Studies included in review",
-    `(n = ${c.db.ftIncluded + c.other.ftIncluded})`,
-    `Via databases (n = ${c.db.ftIncluded})`,
-    `Via snowballing (n = ${c.other.ftIncluded})`,
-  ]);
-  const includedB: Box = { ...included, y };
-  boxes.push(includedB);
-  const last = placed[placed.length - 1];
-  arrows.push(
-    `M ${mainMid} ${last.main.y + last.main.h} L ${mainMid} ${includedB.y}`
-  );
-  const incMidY = includedB.y + includedB.h / 2;
-  arrows.push(
-    `M ${othMid} ${last.oth.y + last.oth.h} L ${othMid} ${incMidY} L ${MAIN_X + MAIN_W} ${incMidY}`
+  const identBottom = Math.max(...placed[0].map((b) => b.y + b.h));
+  const bands = stageBands(
+    headerTop,
+    identBottom,
+    (at(4, MAIN_X)?.y ?? height) - GAP / 2,
+    height - 20
   );
 
-  return { boxes, arrows, width, height: y + included.h + 20 };
+  return {
+    boxes: [...headers, ...bands, ...placed.flat()],
+    arrows,
+    width,
+    height,
+  };
 }
 
 function PrismaDiagram({
@@ -581,10 +610,12 @@ function PrismaDiagram({
           <path d="M0,0 L8,4 L0,8 z" fill="#3f3f46" />
         </marker>
       </defs>
-      {arrows.map((d, i) => (
+      {arrows.map((pts, i) => (
         <path
           key={i}
-          d={d}
+          d={pts
+            .map(([x, y], pi) => `${pi === 0 ? "M" : "L"} ${x} ${y}`)
+            .join(" ")}
           stroke="#3f3f46"
           strokeWidth="1.4"
           fill="none"
@@ -603,24 +634,40 @@ function PrismaDiagram({
             stroke={b.header ? "none" : "#3f3f46"}
             strokeWidth="1.2"
           />
-          {b.lines.map((line, li) => (
+          {b.vertical ? (
             <text
-              key={li}
-              x={b.header ? b.x + b.w / 2 : b.x + 10}
-              y={
-                b.header
-                  ? b.y + b.h / 2 + 4.5
-                  : b.y + 10 + (li + 1) * 16 - 4
-              }
-              textAnchor={b.header ? "middle" : "start"}
-              fontWeight={b.header ? 600 : 400}
+              x={b.x + b.w / 2}
+              y={b.y + b.h / 2}
+              transform={`rotate(-90 ${b.x + b.w / 2} ${b.y + b.h / 2})`}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontWeight={600}
               fontFamily="Helvetica, Arial, sans-serif"
               fontSize="12.5"
               fill="#18181b"
             >
-              {line}
+              {b.lines[0]}
             </text>
-          ))}
+          ) : (
+            b.lines.map((line, li) => (
+              <text
+                key={li}
+                x={b.header ? b.x + b.w / 2 : b.x + 10}
+                y={
+                  b.header
+                    ? b.y + b.h / 2 + 4.5
+                    : b.y + 10 + (li + 1) * 16 - 4
+                }
+                textAnchor={b.header ? "middle" : "start"}
+                fontWeight={b.header ? 600 : 400}
+                fontFamily="Helvetica, Arial, sans-serif"
+                fontSize="12.5"
+                fill="#18181b"
+              >
+                {line}
+              </text>
+            ))
+          )}
         </g>
       ))}
     </svg>
@@ -836,6 +883,92 @@ export default function PrismaClient({ project }: { project: Project }) {
     );
   }
 
+  /**
+   * The diagram as editable PowerPoint shapes: every box is a real
+   * text box and every arrow a line, so users can move elements and
+   * edit text, then use it directly or paste into Word.
+   */
+  async function exportPptx() {
+    if (!counts) return;
+    const { boxes, arrows, width, height } = layoutDiagram(counts);
+    const pptxgen = (await import("pptxgenjs")).default;
+    const pres = new pptxgen();
+    pres.defineLayout({ name: "PRISMA", width: 13.33, height: 7.5 });
+    pres.layout = "PRISMA";
+    const slide = pres.addSlide();
+    const margin = 0.25;
+    const scale = Math.min(
+      (13.33 - margin * 2) / (width / 96),
+      (7.5 - margin * 2) / (height / 96)
+    );
+    const X = (px: number) => margin + (px / 96) * scale;
+    const Y = (px: number) => margin + (px / 96) * scale;
+    const S = (px: number) => (px / 96) * scale;
+    const fontSize = Math.max(6, Math.round(12.5 * 0.75 * scale * 10) / 10);
+
+    for (const pts of arrows) {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, y1] = pts[i];
+        const [x2, y2] = pts[i + 1];
+        slide.addShape("line", {
+          x: X(Math.min(x1, x2)),
+          y: Y(Math.min(y1, y2)),
+          w: S(Math.abs(x2 - x1)),
+          h: S(Math.abs(y2 - y1)),
+          flipH: x2 < x1,
+          flipV: y2 < y1,
+          line: {
+            color: "3F3F46",
+            width: 1,
+            // Arrowhead only on the final segment of a polyline.
+            endArrowType: i === pts.length - 2 ? "triangle" : "none",
+          },
+        });
+      }
+    }
+    for (const b of boxes) {
+      if (b.vertical) {
+        // Rotated stage band: swap width and height around the center.
+        const cx = X(b.x) + S(b.w) / 2;
+        const cy = Y(b.y) + S(b.h) / 2;
+        slide.addText(b.lines[0], {
+          x: cx - S(b.h) / 2,
+          y: cy - S(b.w) / 2,
+          w: S(b.h),
+          h: S(b.w),
+          rotate: 270,
+          shape: "rect",
+          fill: { color: "F4F4F5" },
+          line: { type: "none" },
+          fontSize,
+          bold: true,
+          color: "18181B",
+          align: "center",
+          valign: "middle",
+          fontFace: "Helvetica",
+        });
+        continue;
+      }
+      slide.addText(b.lines.join("\n"), {
+        x: X(b.x),
+        y: Y(b.y),
+        w: S(b.w),
+        h: S(b.h),
+        shape: "rect",
+        fill: { color: b.header ? "F4F4F5" : "FAFAFA" },
+        line: b.header ? { type: "none" } : { color: "3F3F46", width: 1 },
+        fontSize,
+        bold: Boolean(b.header),
+        color: "18181B",
+        align: b.header ? "center" : "left",
+        valign: b.header ? "middle" : "top",
+        fontFace: "Helvetica",
+        margin: 3,
+      });
+    }
+    await pres.writeFile({ fileName: `${base}-prisma-diagram.pptx` });
+  }
+
   function exportSvg() {
     const svg = svgRef.current;
     if (!svg) return;
@@ -910,7 +1043,14 @@ export default function PrismaClient({ project }: { project: Project }) {
               <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Flow diagram
               </h2>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={exportPptx}
+                  className={exportBtn}
+                  title="Every box and arrow as an editable PowerPoint shape: move elements, edit text, then use it directly or paste into Word"
+                >
+                  Editable PowerPoint
+                </button>
                 <button onClick={exportSvg} className={exportBtn}>
                   Download SVG
                 </button>

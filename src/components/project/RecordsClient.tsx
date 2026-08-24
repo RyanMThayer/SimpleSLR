@@ -99,9 +99,6 @@ export default function RecordsClient({
   const [seedTitles, setSeedTitles] = useState<Map<string, string>>(new Map());
   const [absBusy, setAbsBusy] = useState(false);
   const [absMsg, setAbsMsg] = useState<string | null>(null);
-  const [blockedLinks, setBlockedLinks] = useState<
-    { url: string; title: string }[] | null
-  >(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -515,13 +512,9 @@ export default function RecordsClient({
     const needing = rows.filter((r) => !r.fulltext_path);
     const withPdf = rows.length - needing.length;
     const links = needing
-      .map((r) => ({
-        url: r.url?.trim() || (r.doi ? `https://doi.org/${r.doi}` : ""),
-        title: r.title,
-      }))
-      .filter((x) => Boolean(x.url));
+      .map((r) => r.url?.trim() || (r.doi ? `https://doi.org/${r.doi}` : null))
+      .filter((x): x is string => Boolean(x));
     const missing = needing.length - links.length;
-    setBlockedLinks(null);
     if (links.length === 0) {
       setAbsMsg(
         withPdf > 0 && needing.length === 0
@@ -537,16 +530,15 @@ export default function RecordsClient({
       )
     )
       return;
-    const blocked: { url: string; title: string }[] = [];
-    links.forEach((l) => {
-      const w = window.open(l.url, "_blank");
+    let blocked = 0;
+    links.forEach((u) => {
+      const w = window.open(u, "_blank");
       if (w) w.opener = null;
-      else blocked.push(l);
+      else blocked++;
     });
-    if (blocked.length > 0) {
-      setBlockedLinks(blocked);
+    if (blocked > 0) {
       setAbsMsg(
-        `Your browser blocked ${blocked.length} of ${links.length} tabs; they are listed below, and each opens on click. To make this one click in future, allow pop-ups for this site via the icon in the address bar.`
+        `Your browser blocked ${blocked} of ${links.length} tabs. Allow pop-ups and redirects for this site (click the blocked pop-up icon at the right end of the address bar, choose "Always allow"), then click the button again to open them all.`
       );
     } else {
       setAbsMsg(
@@ -1233,37 +1225,6 @@ export default function RecordsClient({
           ))}
         </select>
       </div>
-
-      {blockedLinks && blockedLinks.length > 0 && (
-        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-              {blockedLinks.length} link(s) your browser blocked; click to
-              open (Ctrl/Cmd click to keep this page in front)
-            </p>
-            <button
-              onClick={() => setBlockedLinks(null)}
-              className="shrink-0 text-xs text-amber-700 underline underline-offset-2 dark:text-amber-300"
-            >
-              Dismiss
-            </button>
-          </div>
-          <ul className="flex flex-col gap-1">
-            {blockedLinks.map((l) => (
-              <li key={l.url}>
-                <a
-                  href={l.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-amber-900 underline underline-offset-2 hover:text-amber-700 dark:text-amber-200 dark:hover:text-amber-100"
-                >
-                  {l.title.length > 90 ? `${l.title.slice(0, 90)}...` : l.title}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
         <button
