@@ -174,7 +174,9 @@ export default function ScreenClient({
   const [saving, setSaving] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const undoStack = useRef<{ rec: RecordRow; at: number }[]>([]);
-  // Review mode: walk through records already screened at this stage.
+  // Review mode: walk through records already screened at this stage —
+  // by anyone on the team, so a member who joins late can still go
+  // through everything and add their own decisions.
   const [reviewing, setReviewing] = useState(false);
   const [myDecisions, setMyDecisions] = useState<
     Map<
@@ -186,6 +188,25 @@ export default function ScreenClient({
       }
     >
   >(new Map());
+  // record_id -> decided_by -> that member's decision at this stage.
+  const [teamDecisions, setTeamDecisions] = useState<
+    Map<
+      string,
+      Map<
+        string,
+        {
+          decision: Decision;
+          reason_id: string | null;
+          inclusion_code_id: string | null;
+        }
+      >
+    >
+  >(new Map());
+  // Active records with at least one decision at this stage (any member).
+  const [teamScreened, setTeamScreened] = useState(0);
+  const [memberNames, setMemberNames] = useState<Map<string, string>>(
+    new Map()
+  );
   // Inclusion codes (optional tags on include decisions)
   const [incCodes, setIncCodes] = useState<InclusionCode[]>([]);
   const [incCodesMissing, setIncCodesMissing] = useState(false);
@@ -271,26 +292,45 @@ export default function ScreenClient({
     setIncCodes(codeErr ? [] : ((codeRows ?? []) as InclusionCode[]));
     setIncCodesMissing(Boolean(codeErr?.message.includes("does not exist")));
 
-    // Which records has this user already decided at this stage?
+    // Member display names, for showing whose decision is whose in review.
+    const { data: memberRows } = await supabase
+      .from("project_members")
+      .select("user_id, profiles(display_name, email)")
+      .eq("project_id", project.id);
+    const names = new Map<string, string>();
+    (
+      (memberRows ?? []) as unknown as {
+        user_id: string;
+        profiles:
+          | { display_name: string | null; email: string | null }
+          | { display_name: string | null; email: string | null }[]
+          | null;
+      }[]
+    ).forEach((m) => {
+      const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+      names.set(m.user_id, p?.display_name || p?.email || "Member");
+    });
+    setMemberNames(names);
+
+    // Every member's decisions at this stage: my own filter the queue,
+    // and the full team map powers review mode.
+    type DecInfo = {
+      decision: Decision;
+      reason_id: string | null;
+      inclusion_code_id: string | null;
+    };
     const decided = new Set<string>();
-    const myDecs = new Map<
-      string,
-      {
-        decision: Decision;
-        reason_id: string | null;
-        inclusion_code_id: string | null;
-      }
-    >();
+    const myDecs = new Map<string, DecInfo>();
+    const teamMap = new Map<string, Map<string, DecInfo>>();
     const decSelect = codeErr
-      ? "record_id, decision, reason_id"
-      : "record_id, decision, reason_id, inclusion_code_id";
+      ? "record_id, decision, reason_id, decided_by"
+      : "record_id, decision, reason_id, inclusion_code_id, decided_by";
     for (let from = 0; ; from += 1000) {
       const { data, error: dErr } = await supabase
         .from("screening_decisions")
         .select(decSelect)
         .eq("project_id", project.id)
         .eq("stage", stage)
-        .eq("decided_by", userId)
         .range(from, from + 999);
       if (dErr) {
         setError(dErr.message);
@@ -302,38 +342,62 @@ export default function ScreenClient({
           decision: string;
           reason_id: string | null;
           inclusion_code_id?: string | null;
+          decided_by: string;
         }[]
       ).forEach((d) => {
-        decided.add(d.record_id);
-        myDecs.set(d.record_id, {
+        const info: DecInfo = {
           decision: d.decision as Decision,
           reason_id: d.reason_id,
           inclusion_code_id: d.inclusion_code_id ?? null,
-        });
+        };
+        const perUser = teamMap.get(d.record_id) ?? new Map<string, DecInfo>();
+        perUser.set(d.decided_by, info);
+        teamMap.set(d.record_id, perUser);
+        if (d.decided_by === userId) {
+          decided.add(d.record_id);
+          myDecs.set(d.record_id, info);
+        }
       });
       if (!data || data.length < 1000) break;
     }
     setMyDecisions(myDecs);
+    setTeamDecisions(teamMap);
+
+    // Screened = active records with at least one decision from anyone.
+    const activeIds = new Set<string>();
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase
+        .from("records")
+        .select("id")
+        .eq("project_id", project.id)
+        .eq("status", "active")
+        .range(from, from + 999);
+      (data ?? []).forEach((r) => activeIds.add(r.id));
+      if (!data || data.length < 1000) break;
+    }
+    const screenedIds = [...teamMap.keys()].filter((id) => activeIds.has(id));
+    setTeamScreened(screenedIds.length);
 
     if (reviewing) {
-      // Walk everything I have decided at this stage, oldest first, so
-      // any decision can be revisited and changed in place.
-      const ids = [...decided];
-      const mine: RecordRow[] = [];
-      for (let i = 0; i < ids.length; i += 100) {
+      // Walk everything the team has decided at this stage, oldest
+      // first, so any record can be revisited: your own decisions can
+      // be changed in place, and records screened by others before you
+      // joined can be read and given your own decision.
+      const revs: RecordRow[] = [];
+      for (let i = 0; i < screenedIds.length; i += 100) {
         const { data } = await supabase
           .from("records")
           .select("*")
           .eq("project_id", project.id)
           .eq("status", "active")
-          .in("id", ids.slice(i, i + 100));
-        mine.push(...((data ?? []) as RecordRow[]));
+          .in("id", screenedIds.slice(i, i + 100));
+        revs.push(...((data ?? []) as RecordRow[]));
       }
-      mine.sort((a, b) => a.created_at.localeCompare(b.created_at));
-      setMineTotal(mine.length);
-      setMineDone(mine.length);
+      revs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      setMineTotal(revs.length);
+      setMineDone(revs.length);
       setError(null);
-      setQueue(mine);
+      setQueue(revs);
       setIdx(0);
       return;
     }
@@ -567,13 +631,21 @@ export default function ScreenClient({
         setError(insErr.message);
         return;
       }
+      const savedInfo = {
+        decision,
+        reason_id: reasonId,
+        inclusion_code_id: codeId,
+      };
       setMyDecisions((m) => {
         const next = new Map(m);
-        next.set(current.id, {
-          decision,
-          reason_id: reasonId,
-          inclusion_code_id: codeId,
-        });
+        next.set(current.id, savedInfo);
+        return next;
+      });
+      setTeamDecisions((m) => {
+        const next = new Map(m);
+        const perUser = new Map(next.get(current.id) ?? []);
+        perUser.set(userId, savedInfo);
+        next.set(current.id, perUser);
         return next;
       });
       const at = Math.min(idx, queue.length - 1);
@@ -1132,6 +1204,21 @@ export default function ScreenClient({
             ) : (
               <>
                 {mineDone} / {mineTotal} done ({pct}%)
+                {teamScreened > 0 && (
+                  <>
+                    {" · "}
+                    <button
+                      onClick={() => {
+                        setReviewing(true);
+                        setQueue(null);
+                      }}
+                      className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200"
+                      title="Walk through every record the team has screened at this stage"
+                    >
+                      review screened ({teamScreened})
+                    </button>
+                  </>
+                )}
               </>
             )}
           </span>
@@ -1154,37 +1241,76 @@ export default function ScreenClient({
           />
         </div>
         {reviewing && current && (
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Your current decision:{" "}
+          <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             {(() => {
-              const d = myDecisions.get(current.id);
-              if (!d)
-                return <span className="font-medium">none recorded</span>;
-              if (d.decision === "include") {
-                const code = d.inclusion_code_id
-                  ? incCodes.find((c) => c.id === d.inclusion_code_id)
-                  : null;
+              const fmt = (d: {
+                decision: Decision;
+                reason_id: string | null;
+                inclusion_code_id: string | null;
+              }) => {
+                if (d.decision === "include") {
+                  const code = d.inclusion_code_id
+                    ? incCodes.find((c) => c.id === d.inclusion_code_id)
+                    : null;
+                  return (
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                      Include
+                      {code
+                        ? `: ${code.hotkey.toUpperCase()} (${code.label})`
+                        : ""}
+                    </span>
+                  );
+                }
+                const ri = d.reason_id
+                  ? reasons.findIndex((r) => r.id === d.reason_id)
+                  : -1;
                 return (
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                    Include
-                    {code
-                      ? `: ${code.hotkey.toUpperCase()} (${code.label})`
-                      : ""}
+                  <span className="font-medium text-red-600 dark:text-red-400">
+                    Exclude
+                    {ri >= 0 ? `: E${ri + 1} (${reasons[ri].label})` : ""}
                   </span>
                 );
-              }
-              const ri = d.reason_id
-                ? reasons.findIndex((r) => r.id === d.reason_id)
-                : -1;
+              };
+              const mine = myDecisions.get(current.id);
+              const others = [
+                ...(teamDecisions.get(current.id) ?? []),
+              ].filter(([uid]) => uid !== userId);
+              const conflicting =
+                mine && others.some(([, d]) => d.decision !== mine.decision);
               return (
-                <span className="font-medium text-red-600 dark:text-red-400">
-                  Exclude
-                  {ri >= 0 ? `: E${ri + 1} (${reasons[ri].label})` : ""}
-                </span>
+                <>
+                  {others.length > 0 && (
+                    <p>
+                      Team decisions:{" "}
+                      {others.map(([uid, d], i) => (
+                        <span key={uid}>
+                          {i > 0 && " · "}
+                          {memberNames.get(uid) ?? "Member"}: {fmt(d)}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  <p>
+                    Your decision:{" "}
+                    {mine ? (
+                      fmt(mine)
+                    ) : (
+                      <span className="font-medium">none recorded</span>
+                    )}
+                    {conflicting && (
+                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                        conflict
+                      </span>
+                    )}
+                    {" · "}
+                    {mine
+                      ? "press a key to change it, arrows to move on."
+                      : "press a key to add yours, arrows to move on."}
+                  </p>
+                </>
               );
-            })()}{" "}
-            · press a key to change it, arrows to move on.
-          </p>
+            })()}
+          </div>
         )}
       </div>
 
@@ -1206,13 +1332,13 @@ export default function ScreenClient({
               </h2>
               <p className="max-w-md text-zinc-600 dark:text-zinc-400">
                 {reviewing
-                  ? "You have no screened records at this stage to review."
+                  ? "Nobody on the team has screened any records at this stage yet."
                   : stage === "full_text"
                     ? "No records are waiting for full text screening. Records arrive here once the team includes them at the title and abstract stage."
                     : "You have screened everything currently assigned to you. Import more records, ask the owner to distribute unassigned ones, or review the results in the records table."}
               </p>
               <div className="flex flex-wrap justify-center gap-3">
-                {!reviewing && myDecisions.size > 0 && (
+                {!reviewing && teamScreened > 0 && (
                   <button
                     onClick={() => {
                       setReviewing(true);
@@ -1220,7 +1346,7 @@ export default function ScreenClient({
                     }}
                     className={`${btn} border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
                   >
-                    Review my screened records ({myDecisions.size})
+                    Review screened records ({teamScreened})
                   </button>
                 )}
                 <Link
