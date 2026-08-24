@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
 import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
+import { buildPrismaSummary, formatLongDate } from "@/lib/prismaSummary";
 import type {
   ExclusionReason,
   ImportBatch,
@@ -688,6 +689,7 @@ export default function PrismaClient({ project }: { project: Project }) {
   const [data, setData] = useState<Data | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const load = useCallback(async () => {
@@ -1010,6 +1012,29 @@ export default function PrismaClient({ project }: { project: Project }) {
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
   }
 
+  const summary =
+    counts && data
+      ? buildPrismaSummary({
+          searchConfig: project.search_config,
+          databases: data.databases,
+          counts,
+          memberCount: data.profiles.size,
+          asOf: formatLongDate(stamp) ?? stamp,
+        })
+      : null;
+
+  async function copySummary() {
+    if (!summary) return;
+    try {
+      await navigator.clipboard.writeText(summary.join("\n\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context); the text on the
+      // page stays selectable, so there is nothing more to do here.
+    }
+  }
+
   const card =
     "rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
   const exportBtn =
@@ -1069,6 +1094,39 @@ export default function PrismaClient({ project }: { project: Project }) {
               <PrismaDiagram counts={counts} svgRef={svgRef} />
             </div>
           </section>
+
+          {summary && (
+            <section className={`${card} mb-6`}>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                  Written summary
+                </h2>
+                <button
+                  onClick={copySummary}
+                  className={exportBtn}
+                  title="Copy the whole summary to the clipboard"
+                >
+                  {copied ? "Copied" : "Copy text"}
+                </button>
+              </div>
+              <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+                A methods section draft in PRISMA 2020 reporting style, built
+                from the same live data as the diagram. Paste it into your
+                paper as a starting point and fill in anything shown in
+                [brackets].
+              </p>
+              <div className="flex flex-col gap-3">
+                {summary.map((p, i) => (
+                  <p
+                    key={i}
+                    className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200"
+                  >
+                    {p}
+                  </p>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className={`${card} mb-6`}>
             <h2 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
