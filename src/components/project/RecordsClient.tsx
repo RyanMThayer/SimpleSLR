@@ -50,7 +50,7 @@ type DecisionFilter =
 type OriginFilter = "all" | "database" | "snowball_backward" | "snowball_forward";
 
 type SourceSummary = {
-  key: string; // database id, or "unlinked"
+  key: string; // database id, "snowball_backward"/"snowball_forward", or "unlinked"
   name: string;
   batchIds: string[];
   imported: number;
@@ -157,17 +157,31 @@ export default function RecordsClient({
         duplicates: 0,
       });
     }
-    const unlinkedIds = allBatches
-      .filter((b) => b.database_id === null)
-      .map((b) => b.id);
-    if (unlinkedIds.length > 0) {
+    // Snowball batches are linked to seed records, not databases, so
+    // they get their own direction entries instead of "unlinked".
+    for (const [origin, name] of [
+      ["snowball_backward", "Snowball backward"],
+      ["snowball_forward", "Snowball forward"],
+    ] as const) {
+      const snow = allBatches.filter((b) => b.origin === origin);
+      if (snow.length === 0) continue;
+      raw.push({
+        key: origin,
+        name,
+        batchIds: snow.map((b) => b.id),
+        imported: snow.reduce((s, b) => s + b.record_count, 0),
+        duplicates: 0,
+      });
+    }
+    const unlinked = allBatches.filter(
+      (b) => b.database_id === null && !b.origin?.startsWith("snowball")
+    );
+    if (unlinked.length > 0) {
       raw.push({
         key: "unlinked",
         name: "Unlinked imports",
-        batchIds: unlinkedIds,
-        imported: allBatches
-          .filter((b) => b.database_id === null)
-          .reduce((s, b) => s + b.record_count, 0),
+        batchIds: unlinked.map((b) => b.id),
+        imported: unlinked.reduce((s, b) => s + b.record_count, 0),
         duplicates: 0,
       });
     }

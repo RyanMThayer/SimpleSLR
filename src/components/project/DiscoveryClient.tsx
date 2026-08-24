@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
 import ImportClient from "@/components/project/ImportClient";
@@ -46,6 +47,7 @@ export default function DiscoveryClient({
   const [savingConfig, setSavingConfig] = useState(false);
   const [databases, setDatabases] = useState<ProjectDatabase[] | null>(null);
   const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [seedTitles, setSeedTitles] = useState<Map<string, string>>(new Map());
   const [termInputs, setTermInputs] = useState<Record<number, string>>({});
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
@@ -117,7 +119,27 @@ export default function DiscoveryClient({
       .select("*")
       .eq("project_id", project.id)
       .order("created_at", { ascending: false });
-    setBatches((batchRows ?? []) as ImportBatch[]);
+    const allBatches = (batchRows ?? []) as ImportBatch[];
+    setBatches(allBatches);
+
+    // Titles of the seed papers behind snowball batches, so those
+    // imports can be shown against the record they came from.
+    const seedIds = [
+      ...new Set(
+        allBatches
+          .filter((b) => b.origin?.startsWith("snowball") && b.seed_record_id)
+          .map((b) => b.seed_record_id as string)
+      ),
+    ];
+    const titles = new Map<string, string>();
+    for (let i = 0; i < seedIds.length; i += 100) {
+      const { data: seeds } = await supabase
+        .from("records")
+        .select("id, title")
+        .in("id", seedIds.slice(i, i + 100));
+      (seeds ?? []).forEach((s) => titles.set(s.id, s.title));
+    }
+    setSeedTitles(titles);
 
     const [act, dup] = await Promise.all([
       supabase
@@ -366,7 +388,13 @@ export default function DiscoveryClient({
   }
 
   const limits = limitsSummary(config);
-  const unlinkedBatches = batches.filter((b) => b.database_id === null);
+  const snowballBatches = batches.filter((b) =>
+    b.origin?.startsWith("snowball")
+  );
+  // Truly unlinked: no database AND not a snowball round.
+  const unlinkedBatches = batches.filter(
+    (b) => b.database_id === null && !b.origin?.startsWith("snowball")
+  );
 
   const isStandard = (db: ProjectDatabase) =>
     db.kind !== "custom" ||
@@ -982,6 +1010,52 @@ export default function DiscoveryClient({
           </button>
         </form>
       </section>
+
+      {/* ---------------- Citation searching imports ---------------- */}
+      {snowballBatches.length > 0 && (
+        <section className={`${card} mb-6`}>
+          <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            Citation searching (snowballing)
+          </h2>
+          <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+            Each of these imports is linked to the included paper it was
+            snowballed from. Manage seeds and fetch more on the{" "}
+            <Link
+              href={`/projects/${project.id}/snowball`}
+              className="underline underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
+            >
+              Snowball page
+            </Link>
+            .
+          </p>
+          <div className="flex flex-col gap-1">
+            {snowballBatches.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center gap-3 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400"
+              >
+                <span className="truncate">
+                  <span className="font-medium text-violet-700 dark:text-violet-300">
+                    {b.origin === "snowball_backward" ? "Backward" : "Forward"}
+                  </span>{" "}
+                  from &ldquo;
+                  {(b.seed_record_id && seedTitles.get(b.seed_record_id)) ??
+                    "deleted paper"}
+                  &rdquo;
+                  {b.filename && <> · {b.filename}</>} · {b.record_count}{" "}
+                  records · {new Date(b.created_at).toLocaleDateString()}
+                </span>
+                <button
+                  onClick={() => deleteBatch(b)}
+                  className="ml-auto text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                >
+                  delete import
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ---------------- Unlinked imports (pre discovery) ---------------- */}
       {unlinkedBatches.length > 0 && (
