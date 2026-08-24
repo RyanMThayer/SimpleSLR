@@ -40,11 +40,14 @@ type StatusFilter = "all" | "active" | "duplicate";
  * inclusion code / exclusion reason. The string "any" is the sentinel
  * for "whole category"; null means "without a code/reason".
  */
+type DecisionStage = "any" | "title_abstract" | "full_text";
 type DecisionFilter =
   | { kind: "all" }
   | { kind: "undecided" }
-  | { kind: "include"; codeId: string | null }
-  | { kind: "exclude"; reasonId: string | null };
+  | { kind: "include"; codeId: string | null; stage: DecisionStage }
+  | { kind: "exclude"; reasonId: string | null; stage: DecisionStage };
+
+type OriginFilter = "all" | "database" | "snowball_backward" | "snowball_forward";
 
 type SourceSummary = {
   key: string; // database id, or "unlinked"
@@ -91,6 +94,8 @@ export default function RecordsClient({
   });
   const [filterOpen, setFilterOpen] = useState(false);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [snowLinks, setSnowLinks] = useState<
@@ -125,6 +130,7 @@ export default function RecordsClient({
     ]);
     const dbs = (dbRes.data ?? []) as { id: string; name: string }[];
     const allBatches = (batchRes.data ?? []) as ImportBatch[];
+    setBatches(allBatches);
     setReasons((reasonRes.data ?? []) as ExclusionReason[]);
 
     // Present from migration 0012 onward; absence just hides the codes.
@@ -186,11 +192,23 @@ export default function RecordsClient({
     if (sourceFilter !== "all") {
       const src = sources?.find((s) => s.key === sourceFilter);
       batchIds = src?.batchIds ?? [];
-      if (batchIds.length === 0) {
-        setRows([]);
-        setTotal(0);
-        return;
-      }
+    }
+    if (originFilter !== "all") {
+      const originIds = batches
+        .filter((b) =>
+          originFilter === "database"
+            ? !b.origin?.startsWith("snowball")
+            : b.origin === originFilter
+        )
+        .map((b) => b.id);
+      batchIds = batchIds
+        ? batchIds.filter((id) => originIds.includes(id))
+        : originIds;
+    }
+    if (batchIds && batchIds.length === 0) {
+      setRows([]);
+      setTotal(0);
+      return;
     }
 
     let pageRecords: RecordRow[];
@@ -273,7 +291,9 @@ export default function RecordsClient({
       const df = decisionFilter;
       const matches = (r: RecordRow): boolean => {
         if (df.kind === "undecided") return (ta.get(r.id)?.length ?? 0) === 0;
-        const decs = [...(ta.get(r.id) ?? []), ...(ft.get(r.id) ?? [])];
+        const all2 = [...(ta.get(r.id) ?? []), ...(ft.get(r.id) ?? [])];
+        const decs =
+          df.stage === "any" ? all2 : all2.filter((d) => d.stage === df.stage);
         if (df.kind === "include") {
           return decs.some(
             (d) =>
@@ -338,7 +358,7 @@ export default function RecordsClient({
     setSnowLinks(linkMap);
     setSeedTitles(titleMap);
     setRows(pageRecords);
-  }, [projectId, page, pageSize, search, status, decisionFilter, sourceFilter, sources]);
+  }, [projectId, page, pageSize, search, status, decisionFilter, sourceFilter, sources, originFilter, batches]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside loadSources().
@@ -901,6 +921,37 @@ export default function RecordsClient({
     if (close) setFilterOpen(false);
   };
 
+  const curStage = (k: "include" | "exclude"): DecisionStage =>
+    decisionFilter.kind === k ? decisionFilter.stage : "any";
+
+  const stageChipRow = (kind: "include" | "exclude") => {
+    if (decisionFilter.kind !== kind) return null;
+    const df = decisionFilter;
+    const label = (s: DecisionStage) =>
+      s === "any"
+        ? "Any stage"
+        : s === "title_abstract"
+          ? "Title/abstract"
+          : "Full text (final)";
+    return (
+      <div className="ml-4 flex flex-wrap gap-1 border-l border-zinc-100 pb-1 pl-2 dark:border-zinc-800">
+        {(["any", "title_abstract", "full_text"] as DecisionStage[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => applyFilter({ ...df, stage: s }, false)}
+            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+              df.stage === s
+                ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+                : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/60"
+            }`}
+          >
+            {label(s)}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   const filterItem = (label: string, active: boolean, onClick: () => void) => (
     <button
       onClick={onClick}
@@ -915,24 +966,40 @@ export default function RecordsClient({
   );
 
   const filterLabel = (f: DecisionFilter): string => {
+    const stageSuffix = (s: DecisionStage) =>
+      s === "title_abstract"
+        ? " · title/abstract"
+        : s === "full_text"
+          ? " · full text"
+          : "";
     switch (f.kind) {
       case "all":
         return "Any decision";
       case "undecided":
         return "Undecided";
-      case "include":
-        if (f.codeId === "any") return "Included (all)";
-        if (f.codeId === null) return "Included, no code";
-        return `Included: ${
-          inclusionCodes.find((c) => c.id === f.codeId)?.label ?? "removed code"
-        }`;
+      case "include": {
+        const base =
+          f.codeId === "any"
+            ? "Included (all)"
+            : f.codeId === null
+              ? "Included, no code"
+              : `Included: ${
+                  inclusionCodes.find((c) => c.id === f.codeId)?.label ??
+                  "removed code"
+                }`;
+        return base + stageSuffix(f.stage);
+      }
       case "exclude": {
-        if (f.reasonId === "any") return "Excluded (all)";
-        if (f.reasonId === null) return "Excluded, no reason";
-        const i = reasons.findIndex((r) => r.id === f.reasonId);
-        return i >= 0
-          ? `Excluded: E${i + 1} ${reasons[i].label}`
-          : "Excluded: removed reason";
+        const i = f.reasonId ? reasons.findIndex((r) => r.id === f.reasonId) : -1;
+        const base =
+          f.reasonId === "any"
+            ? "Excluded (all)"
+            : f.reasonId === null
+              ? "Excluded, no reason"
+              : i >= 0
+                ? `Excluded: E${i + 1} ${reasons[i].label}`
+                : "Excluded: removed reason";
+        return base + stageSuffix(f.stage);
       }
     }
   };
@@ -1104,6 +1171,20 @@ export default function RecordsClient({
           <option value="duplicate">Duplicates</option>
           <option value="all">All statuses</option>
         </select>
+        <select
+          className={selectCls}
+          value={originFilter}
+          onChange={(e) => {
+            setOriginFilter(e.target.value as OriginFilter);
+            setPage(0);
+          }}
+          title="Filter by how records entered the project"
+        >
+          <option value="all">All origins</option>
+          <option value="database">Database searches</option>
+          <option value="snowball_backward">Snowball backward</option>
+          <option value="snowball_forward">Snowball forward</option>
+        </select>
         <div className="relative">
           <button
             onClick={() => setFilterOpen((o) => !o)}
@@ -1136,22 +1217,23 @@ export default function RecordsClient({
                     decisionFilter.codeId === "any",
                   () =>
                     applyFilter(
-                      { kind: "include", codeId: "any" },
+                      { kind: "include", codeId: "any", stage: curStage("include") },
                       inclusionCodes.length === 0
                     )
                 )}
                 {decisionFilter.kind === "include" &&
                   inclusionCodes.length > 0 && (
                     <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
+                      {stageChipRow("include")}
                       {filterItem(
                         "All included",
                         decisionFilter.codeId === "any",
-                        () => applyFilter({ kind: "include", codeId: "any" }, true)
+                        () => applyFilter({ kind: "include", codeId: "any", stage: curStage("include") }, true)
                       )}
                       {filterItem(
                         "Include, no code",
                         decisionFilter.codeId === null,
-                        () => applyFilter({ kind: "include", codeId: null }, true)
+                        () => applyFilter({ kind: "include", codeId: null, stage: curStage("include") }, true)
                       )}
                       {inclusionCodes.map((c) => (
                         <div key={c.id} className="flex flex-col">
@@ -1160,7 +1242,7 @@ export default function RecordsClient({
                             decisionFilter.codeId === c.id,
                             () =>
                               applyFilter(
-                                { kind: "include", codeId: c.id },
+                                { kind: "include", codeId: c.id, stage: curStage("include") },
                                 true
                               )
                           )}
@@ -1174,21 +1256,22 @@ export default function RecordsClient({
                     decisionFilter.reasonId === "any",
                   () =>
                     applyFilter(
-                      { kind: "exclude", reasonId: "any" },
+                      { kind: "exclude", reasonId: "any", stage: curStage("exclude") },
                       reasons.length === 0
                     )
                 )}
                 {decisionFilter.kind === "exclude" && reasons.length > 0 && (
                   <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-100 pl-2 dark:border-zinc-800">
+                    {stageChipRow("exclude")}
                     {filterItem(
                       "All excluded",
                       decisionFilter.reasonId === "any",
-                      () => applyFilter({ kind: "exclude", reasonId: "any" }, true)
+                      () => applyFilter({ kind: "exclude", reasonId: "any", stage: curStage("exclude") }, true)
                     )}
                     {filterItem(
                       "Exclude, no reason",
                       decisionFilter.reasonId === null,
-                      () => applyFilter({ kind: "exclude", reasonId: null }, true)
+                      () => applyFilter({ kind: "exclude", reasonId: null, stage: curStage("exclude") }, true)
                     )}
                     {reasons.map((re, i) => (
                       <div key={re.id} className="flex flex-col">
@@ -1197,7 +1280,7 @@ export default function RecordsClient({
                           decisionFilter.reasonId === re.id,
                           () =>
                             applyFilter(
-                              { kind: "exclude", reasonId: re.id },
+                              { kind: "exclude", reasonId: re.id, stage: curStage("exclude") },
                               true
                             )
                         )}
