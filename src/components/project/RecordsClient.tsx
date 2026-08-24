@@ -1418,8 +1418,35 @@ export default function RecordsClient({
           </p>
         ) : (
           rows.map((r) => {
-            const decs = taDecs.get(r.id) ?? [];
-            const mine = decs.find((d) => d.decided_by === userId);
+            const taD = taDecs.get(r.id) ?? [];
+            const ftD = ftDecs.get(r.id) ?? [];
+            // The row badge shows the record's most recent designation:
+            // the full text outcome once any full text decision exists,
+            // otherwise the title/abstract outcome.
+            const stageDecs = ftD.length > 0 ? ftD : taD;
+            const stageLabel = ftD.length > 0 ? "Full text" : "Title/abstract";
+            const outcome = outcomeOf(stageDecs);
+            const badgePick =
+              outcome === "included"
+                ? (stageDecs.find(
+                    (d) => d.decision === "include" && d.inclusion_code_id
+                  ) ?? stageDecs.find((d) => d.decision === "include"))
+                : outcome === "excluded"
+                  ? (stageDecs.find(
+                      (d) => d.decision === "exclude" && d.reason_id
+                    ) ?? stageDecs.find((d) => d.decision === "exclude"))
+                  : null;
+            const decLine = (list: ScreeningDecision[]) =>
+              list
+                .map((d) => {
+                  const dt = decisionText(d);
+                  const reason =
+                    d.decision === "exclude" && d.reason_id
+                      ? ` (${reasonCode.get(d.reason_id)?.label ?? "removed reason"})`
+                      : "";
+                  return `${dt.text}${reason}${d.decided_by === userId ? " (you)" : ""}`;
+                })
+                .join(", ");
             const isOpen = expanded === r.id;
             const isEditing = editingId === r.id && form !== null;
             return (
@@ -1464,12 +1491,20 @@ export default function RecordsClient({
                       PDF
                     </span>
                   )}
-                  {mine && (
+                  {outcome === "conflict" && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-xs ${badge(mine.decision)}`}
-                      title={decisionText(mine).tip}
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                      title={`${stageLabel}: reviewers disagree`}
                     >
-                      {decisionText(mine).text}
+                      conflict
+                    </span>
+                  )}
+                  {badgePick && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs ${badge(badgePick.decision)}`}
+                      title={`${stageLabel}: ${decisionText(badgePick).tip}`}
+                    >
+                      {decisionText(badgePick).text}
                     </span>
                   )}
                   <span className="w-12 shrink-0 text-right text-xs text-zinc-400">
@@ -1501,19 +1536,13 @@ export default function RecordsClient({
                         {r.abstract}
                       </p>
                     )}
-                    {decs.length > 0 && (
+                    {(taD.length > 0 || ftD.length > 0) && (
                       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        Decisions:{" "}
-                        {decs
-                          .map((d) => {
-                            const dt = decisionText(d);
-                            const reason =
-                              d.decision === "exclude" && d.reason_id
-                                ? ` (${reasonCode.get(d.reason_id)?.label ?? "removed reason"})`
-                                : "";
-                            return `${dt.text}${reason}${d.decided_by === userId ? " (you)" : ""}`;
-                          })
-                          .join(", ")}
+                        {taD.length > 0 && (
+                          <>Title/abstract: {decLine(taD)}</>
+                        )}
+                        {taD.length > 0 && ftD.length > 0 && " · "}
+                        {ftD.length > 0 && <>Full text: {decLine(ftD)}</>}
                       </p>
                     )}
                     {r.status === "active" && (
