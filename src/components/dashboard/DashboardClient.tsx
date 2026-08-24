@@ -45,12 +45,16 @@ export default function DashboardClient({ userId }: { userId: string }) {
             .select("id", { count: "exact", head: true })
             .eq("project_id", p.id)
             .eq("status", "active"),
+          // Inner join onto records so decisions on records that were
+          // later marked duplicates never count: done can then not
+          // exceed the live record total (the 104/103 dashboard bug).
           supabase
             .from("screening_decisions")
-            .select("id", { count: "exact", head: true })
+            .select("id, records!inner(id)", { count: "exact", head: true })
             .eq("project_id", p.id)
             .eq("stage", "title_abstract")
-            .eq("decided_by", userId),
+            .eq("decided_by", userId)
+            .eq("records.status", "active"),
         ]);
         return {
           ...p,
