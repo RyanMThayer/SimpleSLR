@@ -321,6 +321,30 @@ export default function SnowballClient({
     const stamp = new Date().toISOString().slice(0, 10);
     const origin =
       dir === "backward" ? "snowball_backward" : "snowball_forward";
+
+    // Same file, same seed, same direction: almost certainly an
+    // accidental re-upload, which would only create duplicate records.
+    if (fileLabel !== "manual entry") {
+      const { data: prior } = await supabase
+        .from("import_batches")
+        .select("record_count, created_at")
+        .eq("project_id", projectId)
+        .eq("seed_record_id", seed.id)
+        .eq("origin", origin)
+        .eq("filename", fileLabel)
+        .order("created_at")
+        .limit(1);
+      if (prior && prior.length > 0) {
+        const ok = window.confirm(
+          `"${fileLabel}" was already imported ${dir} for this seed on ${new Date(prior[0].created_at).toLocaleDateString()} (${prior[0].record_count} records). Importing it again only creates duplicates. Import anyway?`
+        );
+        if (!ok) {
+          setFiBusy(false);
+          return;
+        }
+      }
+    }
+
     const { data: batch, error: bErr } = await supabase
       .from("import_batches")
       .insert({

@@ -132,6 +132,31 @@ export default function ImportClient({
     setResult(null);
     const supabase = createClient();
 
+    // The same file imported twice for the same database is almost
+    // always an accident; it would only create duplicate records.
+    if (fileName) {
+      let priorQuery = supabase
+        .from("import_batches")
+        .select("record_count, created_at")
+        .eq("project_id", projectId)
+        .eq("filename", fileName)
+        .order("created_at")
+        .limit(1);
+      priorQuery = databaseId
+        ? priorQuery.eq("database_id", databaseId)
+        : priorQuery.is("database_id", null);
+      const { data: prior } = await priorQuery;
+      if (prior && prior.length > 0) {
+        const ok = window.confirm(
+          `"${fileName}" was already imported here on ${new Date(prior[0].created_at).toLocaleDateString()} (${prior[0].record_count} records). Importing it again only creates duplicates. Import anyway?`
+        );
+        if (!ok) {
+          setImporting(false);
+          return;
+        }
+      }
+    }
+
     setProgress("Checking for duplicates...");
     const existingDois = new Set<string>();
     // Title matches need corroboration (shared author, or matching year

@@ -271,11 +271,15 @@ export default function DiscoveryClient({
     load();
   }
 
-  async function deleteBatch(batch: ImportBatch) {
-    const ok = window.confirm(
-      `Delete this import (${batch.filename ?? "file"}, ${batch.record_count} records)? The records and any screening decisions on them are removed permanently. Records from other sources that were marked as duplicates of these will be re-checked and restored where appropriate.`
-    );
-    if (!ok) return;
+  /**
+   * Deletion mechanics shared by the single delete button and the
+   * redundant import cleanup: remove the batch's records, the batch,
+   * any stored PDFs, then re-check dedup marks that pointed at the
+   * deleted records. Returns an error message or the repair note.
+   */
+  async function deleteBatchCore(
+    batch: ImportBatch
+  ): Promise<{ error: string | null; note: string }> {
     const supabase = createClient();
     const { data: idRows } = await supabase
       .from("records")
@@ -290,29 +294,58 @@ export default function DiscoveryClient({
       .from("records")
       .delete()
       .eq("batch_id", batch.id);
-    if (recErr) {
-      setError(recErr.message);
-      return;
-    }
+    if (recErr) return { error: recErr.message, note: "" };
     const { error: delErr } = await supabase
       .from("import_batches")
       .delete()
       .eq("id", batch.id);
-    if (delErr) {
-      setError(delErr.message);
-      return;
-    }
+    if (delErr) return { error: delErr.message, note: "" };
     await removeFulltextPaths(pdfPaths);
+    const repair = await repairDependents(
+      project.id,
+      dependents,
+      new Set(deletedIds)
+    );
+    return { error: null, note: repairSummary(repair) };
+  }
+
+  async function deleteBatch(batch: ImportBatch) {
+    const ok = window.confirm(
+      `Delete this import (${batch.filename ?? "file"}, ${batch.record_count} records)? The records and any screening decisions on them are removed permanently. Records from other sources that were marked as duplicates of these will be re-checked and restored where appropriate.`
+    );
+    if (!ok) return;
     try {
-      const repair = await repairDependents(
-        project.id,
-        dependents,
-        new Set(deletedIds)
-      );
-      setMessage(`Import deleted.${repairSummary(repair)}`);
+      const res = await deleteBatchCore(batch);
+      if (res.error) setError(res.error);
+      else setMessage(`Import deleted.${res.note}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+    load();
+  }
+
+  async function removeRedundantImports(extras: ImportBatch[]) {
+    const ok = window.confirm(
+      `Remove ${extras.length} redundant import(s)? For each file imported more than once for the same seed and direction, the earliest import is kept and the re-uploaded copies (and their duplicate records) are deleted. Dedup marks are re-checked afterwards.`
+    );
+    if (!ok) return;
+    for (const b of extras) {
+      try {
+        const res = await deleteBatchCore(b);
+        if (res.error) {
+          setError(res.error);
+          load();
+          return;
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        load();
+        return;
+      }
+    }
+    setMessage(
+      `Removed ${extras.length} redundant import(s); the earliest copy of each file was kept.`
+    );
     load();
   }
 
@@ -391,6 +424,28 @@ export default function DiscoveryClient({
   const snowballBatches = batches.filter((b) =>
     b.origin?.startsWith("snowball")
   );
+  // The same FILE imported more than once for the same seed and
+  // direction is redundant: keep the earliest, offer to remove the
+  // rest. OpenAlex rounds and manual entries have no unique filename
+  // and are excluded on purpose (repeats there are legitimate).
+  const redundantSnowball = (() => {
+    const groups = new Map<string, ImportBatch[]>();
+    for (const b of snowballBatches) {
+      if (!b.filename || b.filename === "manual entry") continue;
+      const k = `${b.seed_record_id}|${b.origin}|${b.filename}|${b.record_count}`;
+      const list = groups.get(k) ?? [];
+      list.push(b);
+      groups.set(k, list);
+    }
+    const extras: ImportBatch[] = [];
+    for (const list of groups.values()) {
+      // batches are ordered newest first; the last entry is the
+      // original import, everything before it a re-upload.
+      if (list.length > 1) extras.push(...list.slice(0, -1));
+    }
+    return extras;
+  })();
+  const redundantIds = new Set(redundantSnowball.map((b) => b.id));
   // Truly unlinked: no database AND not a snowball round.
   const unlinkedBatches = batches.filter(
     (b) => b.database_id === null && !b.origin?.startsWith("snowball")
@@ -1028,6 +1083,20 @@ export default function DiscoveryClient({
             </Link>
             .
           </p>
+          {redundantSnowball.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              <span>
+                {redundantSnowball.length} import(s) look like the same file
+                uploaded more than once for the same seed.
+              </span>
+              <button
+                onClick={() => removeRedundantImports(redundantSnowball)}
+                className="rounded-full border border-amber-400 px-3 py-1 text-sm transition-colors hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+              >
+                Remove redundant import(s)
+              </button>
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             {snowballBatches.map((b) => (
               <div
@@ -1045,6 +1114,11 @@ export default function DiscoveryClient({
                   {b.filename && <> · {b.filename}</>} · {b.record_count}{" "}
                   records · {new Date(b.created_at).toLocaleDateString()}
                 </span>
+                {redundantIds.has(b.id) && (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                    re-upload
+                  </span>
+                )}
                 <button
                   onClick={() => deleteBatch(b)}
                   className="ml-auto text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
