@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { btnSecondarySm as btn } from "@/lib/ui";
 import { plausibleAbstract } from "@/lib/abstracts";
 import { fulltextPathFor } from "@/lib/fulltext";
 import { normalizeDoi } from "@/lib/normalize";
@@ -175,7 +176,7 @@ export default function DuplicatesClient({
   const recCard = (r: RecordRow, other: RecordRow, showFull: boolean) => (
     <div className="flex flex-1 flex-col rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-700">
       <p className="mb-1 font-medium text-zinc-900 dark:text-zinc-50">{r.title}</p>
-      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+      <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
         {[r.authors, r.year, r.venue, r.source_label].filter(Boolean).join(" · ")}
         {r.doi && <> · {r.doi}</>}
         {r.fulltext_path && (
@@ -196,7 +197,7 @@ export default function DuplicatesClient({
           {r.abstract}
         </p>
       ) : (
-        <p className="text-xs italic text-zinc-400 dark:text-zinc-500">
+        <p className="text-xs italic text-zinc-500 dark:text-zinc-500">
           No abstract in the export.
         </p>
       )}
@@ -205,7 +206,7 @@ export default function DuplicatesClient({
           onClick={() => markDuplicate(other, r)}
           disabled={busy}
           title="Keeps this record active; the other one becomes its duplicate. Missing details (DOI, abstract, PDF...) are copied over first."
-          className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="rounded-full bg-teal-700 px-4 py-1.5 text-xs font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
         >
           Keep this one
         </button>
@@ -225,9 +226,7 @@ export default function DuplicatesClient({
     });
   }
 
-  const btn =
-    "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
-
+  
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -245,7 +244,7 @@ export default function DuplicatesClient({
       </p>
 
       {notice && (
-        <p className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+        <p className="mb-4 rounded-lg border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-200">
           {notice}
         </p>
       )}
@@ -256,13 +255,13 @@ export default function DuplicatesClient({
       )}
 
       {pairs === null ? (
-        <p className="text-zinc-500 dark:text-zinc-400">Comparing titles...</p>
+        <p className="text-zinc-600 dark:text-zinc-400">Comparing titles...</p>
       ) : pairs.length === 0 && !error ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-6 text-center dark:border-zinc-800 dark:bg-zinc-900">
           <p className="mb-2 font-medium text-zinc-900 dark:text-zinc-50">
             No suspicious pairs left.
           </p>
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
             Either the corpus is clean or the import dedup already handled it.
           </p>
           <Link
@@ -280,13 +279,13 @@ export default function DuplicatesClient({
               className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
             >
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs text-zinc-400">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   Pair {i + 1} · title similarity {(p.sim * 100).toFixed(0)}%
                 </p>
                 {(p.a.abstract || p.b.abstract) && (
                   <button
                     onClick={() => toggleExpanded(p)}
-                    className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                    className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                   >
                     {expanded.has(pairKey(p))
                       ? "Collapse abstracts"

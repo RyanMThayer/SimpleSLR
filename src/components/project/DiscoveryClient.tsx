@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { card } from "@/lib/ui";
 import ImportClient from "@/components/project/ImportClient";
 import { parseSearchString, type ParseResult } from "@/lib/parseSearchString";
 import {
@@ -24,12 +25,10 @@ import type {
   SearchConfig,
 } from "@/lib/types";
 
-const card =
-  "rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
 const inputCls =
-  "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+  "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 const primaryBtn =
-  "rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300";
+  "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
 const ghostBtn =
   "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
@@ -384,7 +383,7 @@ export default function DiscoveryClient({
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Discovery
       </h1>
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
         PRISMA identification: build the search string, apply it in each
         database, and import the results. Everything here is shared with the
         whole team.
@@ -403,7 +402,7 @@ export default function DiscoveryClient({
         </p>
       )}
       {message && (
-        <p className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+        <p className="mb-4 rounded-lg border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-200">
           {message}
         </p>
       )}
@@ -424,7 +423,7 @@ export default function DiscoveryClient({
             {pasteOpen ? "Close paste box" : "Paste an existing string"}
           </button>
         </div>
-        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
           Concept groups are combined with AND; terms inside a group with OR.
           Phrases get quotes automatically; type * yourself for truncation
           (e.g. refugee*).
@@ -466,7 +465,7 @@ export default function DiscoveryClient({
 
             {parsed && parsed.ok && (
               <div className="mt-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   Preview: {parsed.groups.length} group(s)
                 </p>
                 <div className="mb-2 flex flex-col gap-2">
@@ -479,7 +478,7 @@ export default function DiscoveryClient({
                           : "border-zinc-200 dark:border-zinc-700"
                       }`}
                     >
-                      <span className="mr-1 text-xs font-semibold text-zinc-400">
+                      <span className="mr-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                         {g.not ? "NOT" : `G${i + 1}`}
                       </span>
                       {g.terms.map((t, ti) => (
@@ -521,7 +520,7 @@ export default function DiscoveryClient({
         {config.groups.map((group, gi) => (
           <div key={gi}>
             {gi > 0 && (
-              <p className="my-2 text-center text-xs font-bold tracking-widest text-zinc-400">
+              <p className="my-2 text-center text-xs font-bold tracking-widest text-zinc-500 dark:text-zinc-400">
                 {group.not ? "AND NOT" : "AND"}
               </p>
             )}
@@ -533,11 +532,11 @@ export default function DiscoveryClient({
               }`}
             >
               <div className="mb-2 flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   {group.not ? `Excluded terms (NOT)` : `Concept ${gi + 1}`}
                 </span>
                 <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
                     <input
                       type="checkbox"
                       checked={Boolean(group.not)}
@@ -553,7 +552,7 @@ export default function DiscoveryClient({
                   {config.groups.length > 1 && (
                     <button
                       onClick={() => removeGroup(gi)}
-                      className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                      className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                     >
                       remove group
                     </button>
@@ -569,7 +568,7 @@ export default function DiscoveryClient({
                     {t}
                     <button
                       onClick={() => removeTerm(gi, ti)}
-                      className="text-zinc-400 hover:text-red-600"
+                      className="text-zinc-500 dark:text-zinc-400 hover:text-red-600"
                       aria-label={`Remove ${t}`}
                     >
                       ×
@@ -654,7 +653,7 @@ export default function DiscoveryClient({
         <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Search limits
         </h2>
-        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
           Eligibility criteria applied while gathering sources. Set them here
           once, apply them in each database&apos;s own filter UI, and report
           them in your methods section.
@@ -753,7 +752,7 @@ export default function DiscoveryClient({
         <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Databases
         </h2>
-        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
           Each database gets the search string translated into its own query
           syntax, using the fields checked above. Record the date and the raw
           hit count when you run the search; both feed the PRISMA diagram.
@@ -761,7 +760,7 @@ export default function DiscoveryClient({
 
         {databases !== null && databases.some((d) => !d.enabled) && (
           <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
               Check a database to add it to the search strategy
             </p>
             <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -830,7 +829,7 @@ export default function DiscoveryClient({
                         db.name
                       )}
                     </label>
-                    <span className="text-xs text-zinc-400">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
                       {imported > 0 ? `${imported} imported` : "nothing imported yet"}
                     </span>
                     <div className="ml-auto flex items-center gap-3">
@@ -840,7 +839,7 @@ export default function DiscoveryClient({
                             setRenamingId(db.id);
                             setRenameValue(db.name);
                           }}
-                          className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                          className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                           title="Rename, e.g. to note the exact edition searched"
                         >
                           rename
@@ -849,7 +848,7 @@ export default function DiscoveryClient({
                       {removable && (
                         <button
                           onClick={() => deleteDatabase(db)}
-                          className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                          className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                         >
                           remove
                         </button>
@@ -867,7 +866,7 @@ export default function DiscoveryClient({
                       {query ? (
                         <div className="mb-2">
                           <div className="mb-1 flex items-center justify-between">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                               Query for {db.name}
                             </span>
                             <button
@@ -880,20 +879,20 @@ export default function DiscoveryClient({
                           <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
                             {query}
                           </pre>
-                          <p className="mt-1 text-xs text-zinc-400">
+                          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                             {KIND_HINTS[db.kind]}
                             {limits && <> Apply in the database UI: {limits}.</>}
                           </p>
                         </div>
                       ) : (
-                        <p className="mb-2 text-sm italic text-zinc-400">
+                        <p className="mb-2 text-sm italic text-zinc-500 dark:text-zinc-400">
                           Add terms to the search string above to generate this
                           database&apos;s query.
                         </p>
                       )}
 
                       <div className="mb-3 flex flex-wrap items-end gap-3">
-                        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
                           Searched on
                           <input
                             type="date"
@@ -904,7 +903,7 @@ export default function DiscoveryClient({
                             }
                           />
                         </label>
-                        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
                           Raw hits reported by {db.name}
                           <input
                             type="number"
@@ -955,7 +954,7 @@ export default function DiscoveryClient({
                               </span>
                               <button
                                 onClick={() => deleteBatch(b)}
-                                className="ml-auto text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                                className="ml-auto text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                               >
                                 delete import
                               </button>
@@ -990,7 +989,7 @@ export default function DiscoveryClient({
           <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Imports not linked to a database
           </h2>
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
             These were imported before databases were tracked. Link them by
             deleting and re-importing under the right database, or keep them as
             they are.
@@ -1007,7 +1006,7 @@ export default function DiscoveryClient({
                 </span>
                 <button
                   onClick={() => deleteBatch(b)}
-                  className="ml-auto text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                  className="ml-auto text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                 >
                   delete import
                 </button>

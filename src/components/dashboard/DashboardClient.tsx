@@ -105,9 +105,9 @@ export default function DashboardClient({ userId }: { userId: string }) {
   }
 
   const inputCls =
-    "h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+    "h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
   const primaryBtn =
-    "rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300";
+    "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
   const ghostBtn =
     "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
@@ -166,9 +166,9 @@ export default function DashboardClient({ userId }: { userId: string }) {
       )}
 
       {projects === null ? (
-        <p className="text-zinc-500 dark:text-zinc-400">Loading...</p>
+        <p className="text-zinc-600 dark:text-zinc-400">Loading...</p>
       ) : projects.length === 0 && !error ? (
-        <p className="text-zinc-500 dark:text-zinc-400">
+        <p className="text-zinc-600 dark:text-zinc-400">
           No reviews yet. Create one, or join a teammate&apos;s review with
           their invite code.
         </p>
@@ -183,7 +183,7 @@ export default function DashboardClient({ userId }: { userId: string }) {
               <h2 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
                 {p.name}
               </h2>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 {p.recordCount} records
                 {p.recordCount > 0 && (
                   <>

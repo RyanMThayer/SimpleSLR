@@ -941,7 +941,7 @@ export default function RecordsClient({
             onClick={() => applyFilter({ ...df, stage: s }, false)}
             className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
               df.stage === s
-                ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+                ? "border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-400 dark:text-teal-950"
                 : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/60"
             }`}
           >
@@ -1044,14 +1044,14 @@ export default function RecordsClient({
     const isExc = mine?.decision === "exclude";
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className="w-24 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        <span className="w-24 shrink-0 text-xs font-medium text-zinc-600 dark:text-zinc-400">
           {stage === "full_text" ? "Full text:" : "Title/abstract:"}
         </span>
         <button
           onClick={() => setMyDecision(r, stage, "include", null)}
-          className={`rounded-full px-3 py-1 text-xs transition-colors ${
+          className={`rounded-full px-3 py-1 text-sm transition-colors ${
             isInc
-              ? "bg-emerald-600 text-white"
+              ? "bg-emerald-700 text-white"
               : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
           }`}
         >
@@ -1071,7 +1071,7 @@ export default function RecordsClient({
                 v === "__plain" ? null : v
               );
             }}
-            className={`h-7 rounded-full border px-2 text-xs ${
+            className={`h-8 rounded-full border px-2 text-sm ${
               isInc
                 ? "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                 : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
@@ -1093,7 +1093,7 @@ export default function RecordsClient({
             if (v === "__unset") return;
             setMyDecision(r, stage, "exclude", v === "__none" ? null : v);
           }}
-          className={`h-7 rounded-full border px-2 text-xs ${
+          className={`h-8 rounded-full border px-2 text-sm ${
             isExc
               ? "border-red-400 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
               : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
@@ -1113,7 +1113,7 @@ export default function RecordsClient({
           <button
             onClick={() => clearMyDecision(r, stage)}
             title="Removes your decision at this stage; the record returns to your queue"
-            className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-full border border-zinc-300 px-3 py-1 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
             Undecided
           </button>
@@ -1122,7 +1122,7 @@ export default function RecordsClient({
           <button
             onClick={() => resetTeamDecisions(r, stage)}
             title="Removes EVERY reviewer's decision at this stage; the record returns to the whole team's queues"
-            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+            className="text-sm text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
           >
             reset all reviewers
           </button>
@@ -1134,8 +1134,8 @@ export default function RecordsClient({
   const selectCls =
     "h-9 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
   const inputCls =
-    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
-  const linkBtn = "text-xs underline underline-offset-2";
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+  const linkBtn = "text-sm underline underline-offset-2";
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
@@ -1151,7 +1151,7 @@ export default function RecordsClient({
           Records
         </h1>
         <input
-          className="h-9 w-64 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="h-9 w-64 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           placeholder="Search titles..."
           value={search}
           onChange={(e) => {
@@ -1192,7 +1192,7 @@ export default function RecordsClient({
             title="Filter by decision, refined by inclusion code or exclusion reason"
           >
             <span className="truncate">{filterLabel(decisionFilter)}</span>
-            <span className="text-zinc-400">▾</span>
+            <span className="text-zinc-500 dark:text-zinc-400">▾</span>
           </button>
           {filterOpen && (
             <>
@@ -1297,14 +1297,14 @@ export default function RecordsClient({
         <button
           onClick={fetchMissingAbstracts}
           disabled={absBusy}
-          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           {absBusy ? "Searching..." : "Find missing abstracts"}
         </button>
         <button
           onClick={fetchOaEnrichment}
           disabled={absBusy}
-          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           {absBusy ? "Working..." : "Fetch open access PDFs"}
         </button>
@@ -1312,7 +1312,7 @@ export default function RecordsClient({
           onClick={openAllLinks}
           disabled={!rows || rows.every((r) => Boolean(r.fulltext_path))}
           title="Opens every record in the current view that has no stored PDF yet in a new browser tab, using its link or DOI. Your browser may ask you to allow pop-ups the first time."
-          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           Open links in tabs ({rows?.filter((r) => !r.fulltext_path).length ?? 0})
         </button>
@@ -1325,10 +1325,10 @@ export default function RecordsClient({
       {sources !== null && sources.length > 0 && (
         <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
               Sources
             </p>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {totalDuplicates} duplicates across all sources
             </p>
           </div>
@@ -1338,9 +1338,9 @@ export default function RecordsClient({
                 setSourceFilter("all");
                 setPage(0);
               }}
-              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
                 sourceFilter === "all"
-                  ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                  ? "border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-400 dark:text-teal-950"
                   : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
               }`}
             >
@@ -1349,9 +1349,9 @@ export default function RecordsClient({
             {sources.map((s) => (
               <span
                 key={s.key}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                   sourceFilter === s.key
-                    ? "border-zinc-900 bg-zinc-900 text-zinc-50 dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                    ? "border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-400 dark:text-teal-950"
                     : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
                 }`}
               >
@@ -1397,7 +1397,7 @@ export default function RecordsClient({
           }}
         />
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm text-zinc-600 dark:text-zinc-300">
+          <span className="text-sm tabular-nums text-zinc-600 dark:text-zinc-300">
             {total === 0
               ? "No records"
               : total <= pageSize
@@ -1479,7 +1479,7 @@ export default function RecordsClient({
                       {r.title}
                     </span>
                     {r.authors && (
-                      <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="block truncate text-xs text-zinc-600 dark:text-zinc-400">
                         {r.authors}
                       </span>
                     )}
@@ -1520,14 +1520,14 @@ export default function RecordsClient({
                       {decisionText(badgePick).text}
                     </span>
                   )}
-                  <span className="w-12 shrink-0 text-right text-xs text-zinc-400">
+                  <span className="w-12 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
                     {r.year ?? ""}
                   </span>
                 </button>
 
                 {isOpen && !isEditing && (
                   <div className="px-5 pb-4 text-sm">
-                    <p className="mb-1 text-zinc-500 dark:text-zinc-400">
+                    <p className="mb-1 text-zinc-600 dark:text-zinc-400">
                       {[r.authors, r.venue, r.source_label].filter(Boolean).join(" · ")}
                       {r.doi && <> · DOI: {r.doi}</>}
                     </p>
@@ -1550,7 +1550,7 @@ export default function RecordsClient({
                       </p>
                     )}
                     {(taD.length > 0 || ftD.length > 0) && (
-                      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
                         {taD.length > 0 && (
                           <>Title/abstract: {decLine(taD)}</>
                         )}
@@ -1566,7 +1566,7 @@ export default function RecordsClient({
                             {decisionRow(r, "full_text")}
                             <button
                               onClick={() => toggleRetrieval(r)}
-                              className="self-start text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                              className="self-start text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                             >
                               {r.retrieval_status === "not_retrieved"
                                 ? "Marked as full text not retrievable · undo"
@@ -1575,7 +1575,7 @@ export default function RecordsClient({
                           </>
                         )}
                         <div className="flex flex-wrap items-center gap-3 text-xs">
-                          <span className="font-medium text-zinc-500 dark:text-zinc-400">
+                          <span className="font-medium text-zinc-600 dark:text-zinc-400">
                             PDF:
                           </span>
                           {r.fulltext_path ? (
@@ -1595,7 +1595,7 @@ export default function RecordsClient({
                               </button>
                               <button
                                 onClick={() => removePdf(r)}
-                                className="underline underline-offset-2 text-zinc-400 hover:text-red-600"
+                                className="underline underline-offset-2 text-zinc-500 dark:text-zinc-400 hover:text-red-600"
                               >
                                 Remove
                               </button>
@@ -1627,7 +1627,7 @@ export default function RecordsClient({
                       </button>
                       <button
                         onClick={() => deleteRecord(r)}
-                        className={`${linkBtn} text-zinc-400 hover:text-red-600`}
+                        className={`${linkBtn} text-zinc-500 dark:text-zinc-400 hover:text-red-600`}
                       >
                         Delete record
                       </button>
@@ -1685,7 +1685,7 @@ export default function RecordsClient({
                       <button
                         onClick={() => saveEdit(r.id)}
                         disabled={saving || !form.title.trim()}
-                        className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-zinc-50 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+                        className="rounded-full bg-teal-700 px-4 py-1.5 text-xs font-medium text-zinc-50 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950"
                       >
                         {saving ? "Saving..." : "Save changes"}
                       </button>
@@ -1694,7 +1694,7 @@ export default function RecordsClient({
                           setEditingId(null);
                           setForm(null);
                         }}
-                        className={`${linkBtn} text-zinc-400`}
+                        className={`${linkBtn} text-zinc-500 dark:text-zinc-400`}
                       >
                         Cancel
                       </button>
@@ -1707,7 +1707,7 @@ export default function RecordsClient({
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="mt-4 flex items-center justify-between text-sm text-zinc-600 dark:text-zinc-400">
         <button
           disabled={page === 0}
           onClick={() => setPage((p) => p - 1)}

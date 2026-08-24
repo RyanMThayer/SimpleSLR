@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { card, btnSecondary as exportBtn } from "@/lib/ui";
 import { buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
 import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
 import { buildPrismaSummary, formatLongDate } from "@/lib/prismaSummary";
@@ -1035,17 +1036,13 @@ export default function PrismaClient({ project }: { project: Project }) {
     }
   }
 
-  const card =
-    "rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
-  const exportBtn =
-    "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
-
+    
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         PRISMA and exports
       </h1>
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
         Every number here is computed live from the records and decisions;
         nothing is entered by hand.
       </p>
@@ -1057,7 +1054,7 @@ export default function PrismaClient({ project }: { project: Project }) {
       )}
 
       {!counts || !data ? (
-        <p className="text-zinc-500 dark:text-zinc-400">Computing...</p>
+        <p className="text-zinc-600 dark:text-zinc-400">Computing...</p>
       ) : (
         <>
           {(counts.taUndecided > 0 || counts.taConflicts > 0 || counts.ftUndecided > 0) && (
@@ -1109,7 +1106,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   {copied ? "Copied" : "Copy text"}
                 </button>
               </div>
-              <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
                 A methods section draft in PRISMA 2020 reporting style, built
                 from the same live data as the diagram. Paste it into your
                 paper as a starting point and fill in anything shown in
@@ -1132,9 +1129,9 @@ export default function PrismaClient({ project }: { project: Project }) {
             <h2 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Identification per source
             </h2>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm tabular-nums">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-zinc-400">
+                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   <th className="pb-2">Source</th>
                   <th className="pb-2 text-right">Hits reported</th>
                   <th className="pb-2 text-right">Imported</th>
@@ -1163,7 +1160,7 @@ export default function PrismaClient({ project }: { project: Project }) {
             <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Exports
             </h2>
-            <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
               The RIS files import directly into Zotero or Mendeley for full
               text reading and citing. The backup JSON contains the complete
               project; download one after every serious screening session.

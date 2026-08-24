@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { kbd } from "@/lib/ui";
 import { outcomeOf } from "@/lib/outcomes";
 import { cleanQuote } from "@/lib/concepts";
 import {
@@ -1135,9 +1136,9 @@ export default function ScreenClient({
   const keyChip =
     "flex h-6 min-w-6 shrink-0 items-center justify-center rounded bg-zinc-100 px-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
   const inputCls =
-    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
   const keyInputCls =
-    "h-8 w-12 shrink-0 rounded-lg border border-zinc-300 bg-white py-0 text-center text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+    "h-8 w-12 shrink-0 rounded-lg border border-zinc-300 bg-white py-0 text-center text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
   const hasCriteria = Boolean(incText.trim() || excText.trim());
 
@@ -1174,7 +1175,7 @@ export default function ScreenClient({
             }}
             className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
               stage === s
-                ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
+                ? "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950"
                 : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
             }`}
           >
@@ -1184,7 +1185,7 @@ export default function ScreenClient({
       </div>
 
       <div className="mb-4">
-        <div className="mb-1 flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
+        <div className="mb-1 flex items-center justify-between text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
           <span>
             {stage === "full_text" ? "Full text screening" : "Title and abstract screening"}
             {" · "}
@@ -1222,21 +1223,36 @@ export default function ScreenClient({
               </>
             )}
           </span>
-          <span className="hidden lg:inline">
-            Keys: reason keys exclude · I include
-            {stage !== "full_text" ? <> · E exclude</> : <> · N no access</>} ·
-            ←/→ skip{reviewing ? null : <> · U undo</>}
-            {queue && queue.length > 1 && (
+          <span className="hidden items-center gap-1.5 lg:inline-flex">
+            <kbd className={kbd}>1–9</kbd> exclude
+            <kbd className={kbd}>I</kbd> include
+            {stage !== "full_text" ? (
               <>
-                {" · "}viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length}{" "}
-                {reviewing ? "screened" : "undecided"}
+                <kbd className={kbd}>E</kbd> exclude
               </>
+            ) : (
+              <>
+                <kbd className={kbd}>N</kbd> no access
+              </>
+            )}
+            <kbd className={kbd}>←</kbd>
+            <kbd className={kbd}>→</kbd> skip
+            {!reviewing && (
+              <>
+                <kbd className={kbd}>U</kbd> undo
+              </>
+            )}
+            {queue && queue.length > 1 && (
+              <span className="ml-1">
+                viewing {Math.min(idx, queue.length - 1) + 1} of {queue.length}{" "}
+                {reviewing ? "screened" : "undecided"}
+              </span>
             )}
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
           <div
-            className="h-full rounded-full bg-emerald-500 transition-all"
+            className="h-full rounded-full bg-teal-600 transition-all"
             style={{ width: `${reviewing ? 100 : pct}%` }}
           />
         </div>
@@ -1324,7 +1340,7 @@ export default function ScreenClient({
         {/* ---------------- Record ---------------- */}
         <div className="flex min-w-0 flex-1 flex-col">
           {queue === null ? (
-            <p className="text-zinc-500 dark:text-zinc-400">Loading your queue...</p>
+            <p className="text-zinc-600 dark:text-zinc-400">Loading your queue...</p>
           ) : current === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
               <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1351,7 +1367,7 @@ export default function ScreenClient({
                 )}
                 <Link
                   href={`/projects/${project.id}`}
-                  className={`${btn} bg-zinc-900 text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300`}
+                  className={`${btn} bg-teal-700 text-white hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300`}
                 >
                   Back to project
                 </Link>
@@ -1366,14 +1382,14 @@ export default function ScreenClient({
           ) : (
             <>
               <article className="mb-4 flex flex-1 flex-col overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-                <h2 className="mb-2 text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
+                <h2 className="mb-2 text-2xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
                   <Highlighted
                     text={current.title}
                     include={project.include_keywords}
                     exclude={project.exclude_keywords}
                   />
                 </h2>
-                <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+                <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
                   {[current.authors, current.year, current.venue, current.source_label]
                     .filter(Boolean)
                     .join(" · ")}
@@ -1459,7 +1475,7 @@ export default function ScreenClient({
                         onChange={(e) => setPasteAbs(e.target.value)}
                         rows={6}
                         autoFocus
-                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                       />
                       <div className="flex gap-2">
                         <button
@@ -1494,7 +1510,7 @@ export default function ScreenClient({
                           setEditingAbs(true);
                           setPasteAbs(current.abstract ?? "");
                         }}
-                        className="mt-1 text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                        className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                         title="Fix an imported abstract that is wrong or garbled"
                       >
                         Edit abstract
@@ -1502,7 +1518,7 @@ export default function ScreenClient({
                     </div>
                   ) : (
                     <div>
-                      <p className="italic text-zinc-400 dark:text-zinc-500">
+                      <p className="italic text-zinc-500 dark:text-zinc-500">
                         No abstract in the export for this record.
                       </p>
                       <div className="mt-2 flex max-w-2xl flex-col gap-2">
@@ -1511,7 +1527,7 @@ export default function ScreenClient({
                           onChange={(e) => setPasteAbs(e.target.value)}
                           placeholder="Found it elsewhere? Paste the abstract here and it stays with the record."
                           rows={3}
-                          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                         />
                         {pasteAbs.trim() && (
                           <button
@@ -1535,7 +1551,7 @@ export default function ScreenClient({
                       className="mt-3 h-[78vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"
                     />
                   ) : current.fulltext_path ? (
-                    <p className="mt-3 text-sm text-zinc-400">Loading PDF...</p>
+                    <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading PDF...</p>
                   ) : (
                     <p className="mt-3 rounded-lg border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
                       No PDF uploaded for this record yet. Use the DOI or Link
@@ -1550,7 +1566,7 @@ export default function ScreenClient({
                 <button
                   onClick={() => decide("include")}
                   disabled={saving}
-                  className={`${btn} bg-emerald-600 text-white hover:bg-emerald-500`}
+                  className={`${btn} bg-emerald-700 text-white hover:bg-emerald-600`}
                 >
                   Include (I)
                 </button>
@@ -1604,7 +1620,7 @@ export default function ScreenClient({
               className="flex w-full items-center justify-between text-sm font-semibold text-zinc-900 dark:text-zinc-50"
             >
               Criteria
-              <span className="text-xs text-zinc-400">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 {criteriaOpen ? "hide" : "show"}
               </span>
             </button>
@@ -1612,7 +1628,7 @@ export default function ScreenClient({
               <div className="mt-2 text-sm">
                 {criteriaEditing ? (
                   <div className="flex flex-col gap-2">
-                    <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
                       Inclusion criteria
                       <textarea
                         className={`${inputCls} min-h-20`}
@@ -1620,7 +1636,7 @@ export default function ScreenClient({
                         onChange={(e) => setIncText(e.target.value)}
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
                       Exclusion criteria
                       <textarea
                         className={`${inputCls} min-h-20`}
@@ -1638,7 +1654,7 @@ export default function ScreenClient({
                       </button>
                       <button
                         onClick={() => setCriteriaEditing(false)}
-                        className="text-xs text-zinc-400 underline underline-offset-2"
+                        className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
                       >
                         Cancel
                       </button>
@@ -1670,14 +1686,14 @@ export default function ScreenClient({
                         )}
                       </div>
                     ) : (
-                      <p className="italic text-zinc-400">
+                      <p className="italic text-zinc-500 dark:text-zinc-400">
                         No criteria written down yet. Doing that before
                         screening keeps the whole team calibrated.
                       </p>
                     )}
                     <button
                       onClick={() => setCriteriaEditing(true)}
-                      className="mt-2 text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                      className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                     >
                       Edit
                     </button>
@@ -1694,14 +1710,14 @@ export default function ScreenClient({
               </h3>
               <button
                 onClick={() => setManageOpen(!manageOpen)}
-                className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
               >
                 {manageOpen ? "done" : "manage"}
               </button>
             </div>
 
             {reasons.length === 0 && (
-              <p className="mb-2 text-sm italic text-zinc-400">
+              <p className="mb-2 text-sm italic text-zinc-500 dark:text-zinc-400">
                 No exclusion reasons yet. Add some to exclude with one
                 keypress.
               </p>
@@ -1737,7 +1753,7 @@ export default function ScreenClient({
                       <button
                         type="button"
                         onClick={() => setEditingReasonId(null)}
-                        className="text-xs text-zinc-400 underline underline-offset-2"
+                        className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
                       >
                         Cancel
                       </button>
@@ -1769,13 +1785,13 @@ export default function ScreenClient({
                               setEditingLabel(r.label);
                               setEditingReasonKey(r.hotkey || "");
                             }}
-                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                            className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                           >
                             edit
                           </button>
                           <button
                             onClick={() => deleteReason(r)}
-                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                            className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                           >
                             delete
                           </button>
@@ -1813,7 +1829,7 @@ export default function ScreenClient({
             )}
 
             {reasons.some((r) => !rKeys.get(r.id)) && (
-              <p className="mt-2 text-xs text-zinc-400">
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                 Reasons marked · have no key left: the free digits ran out.
                 Give them any free letter (or digit) via manage.
               </p>
@@ -1827,7 +1843,7 @@ export default function ScreenClient({
               </h3>
               <button
                 onClick={() => setManageIncOpen(!manageIncOpen)}
-                className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
               >
                 {manageIncOpen ? "done" : "manage"}
               </button>
@@ -1871,7 +1887,7 @@ export default function ScreenClient({
                       <button
                         type="button"
                         onClick={() => setEditingIncId(null)}
-                        className="text-xs text-zinc-400 underline underline-offset-2"
+                        className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
                       >
                         Cancel
                       </button>
@@ -1896,13 +1912,13 @@ export default function ScreenClient({
                               setEditingIncLabel(c.label);
                               setEditingIncKey(c.hotkey);
                             }}
-                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
+                            className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                           >
                             edit
                           </button>
                           <button
                             onClick={() => deleteIncCode(c)}
-                            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-red-600"
+                            className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-red-600"
                           >
                             delete
                           </button>
@@ -1939,7 +1955,7 @@ export default function ScreenClient({
               </form>
             )}
             {manageIncOpen && (
-              <p className="mt-2 text-xs text-zinc-400">
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                 Codes tag an include decision (I stays plain include).
                 Hotkeys are single letters; digits and I/E/N/U are taken.
                 Deleting a used code asks where its papers go: stay
@@ -1954,7 +1970,7 @@ export default function ScreenClient({
             )}
           </div>
 
-          <div className={`${sideCard} text-xs text-zinc-500 dark:text-zinc-400`}>
+          <div className={`${sideCard} text-xs text-zinc-600 dark:text-zinc-400`}>
             <p className="mb-1 font-semibold text-zinc-700 dark:text-zinc-300">
               Other keys
             </p>
@@ -1980,7 +1996,7 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => resolveIncDelete("keep")}
-                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Keep them included, just drop the code
               </button>
@@ -2044,7 +2060,7 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => confirmIncEdit(false)}
-                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Keep the decisions (small fix)
               </button>
@@ -2081,7 +2097,7 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => confirmEdit(false)}
-                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Small fix: keep the {editConfirm.affected} decision(s)
               </button>
@@ -2093,7 +2109,7 @@ export default function ScreenClient({
               </button>
               <button
                 onClick={() => setEditConfirm(null)}
-                className="text-sm text-zinc-400 underline underline-offset-2"
+                className="text-sm text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
               >
                 Cancel
               </button>

@@ -41,7 +41,7 @@ export default function SettingsClient({ project }: { project: Project }) {
   }
 
   const inputCls =
-    "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+    "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
   const labelCls =
     "flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
@@ -84,7 +84,7 @@ export default function SettingsClient({ project }: { project: Project }) {
           <button
             onClick={save}
             disabled={saving}
-            className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="rounded-full bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
           >
             {saving ? "Saving..." : "Save"}
           </button>

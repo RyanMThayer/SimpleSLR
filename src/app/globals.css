@@ -22,5 +22,22 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/*
+ * Keyboard focus is a first class citizen in a hotkey driven tool:
+ * one consistent, visible ring on every interactive element. :where()
+ * keeps specificity at zero so component styles still win when they
+ * need to.
+ */
+:where(button, [role="button"], a, select, input, textarea, summary):focus-visible {
+  outline: 2px solid var(--color-teal-600);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(button, [role="button"], a, select, input, textarea, summary):focus-visible {
+    outline-color: var(--color-teal-400);
+  }
 }

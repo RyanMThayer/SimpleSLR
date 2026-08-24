@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { card } from "@/lib/ui";
 import { outcomeOf } from "@/lib/outcomes";
 import { authorTokens, normalizeDoi, normalizeTitle, sharesAuthor } from "@/lib/normalize";
 import { parseRis } from "@/lib/ris";
@@ -703,10 +704,8 @@ export default function SnowballClient({
   const existingCount = candidates?.filter((c) => c.existing).length ?? 0;
   const selectedCount = candidates?.filter((c) => c.selected && !c.existing).length ?? 0;
 
-  const card =
-    "rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
-  const primaryBtn =
-    "rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300";
+    const primaryBtn =
+    "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
   const ghostBtn =
     "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
@@ -722,7 +721,7 @@ export default function SnowballClient({
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Snowballing
       </h1>
-      <p className="mb-6 text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
         Webster and Watson&apos;s go backward (each paper&apos;s references)
         and go forward (papers citing it), via OpenAlex. Pick seeds, fetch,
         tick the relevant candidates; imports enter the normal screening
@@ -737,7 +736,7 @@ export default function SnowballClient({
         </p>
       )}
       {result && (
-        <p className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+        <p className="mb-4 rounded-lg border border-teal-300 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-200">
           {result}{" "}
           <Link href={`/projects/${projectId}/screen`} className="underline underline-offset-2">
             Go screen them
@@ -763,7 +762,7 @@ export default function SnowballClient({
         {seeds === null ? (
           <p className="text-sm text-zinc-500">Loading included records...</p>
         ) : seeds.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             No papers are included after full text screening yet. Webster and
             Watson snowball from the included set, so finish full text
             screening first; newly included papers then appear here as seeds.
@@ -786,7 +785,7 @@ export default function SnowballClient({
                   }}
                 />
                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                <span className="shrink-0 text-xs text-zinc-400">{s.year ?? ""}</span>
+                <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{s.year ?? ""}</span>
                 <button
                   onClick={(e) => {
                     e.preventDefault();
@@ -927,7 +926,7 @@ export default function SnowballClient({
                   <span className="block text-zinc-900 dark:text-zinc-50">
                     {c.ref.title}
                   </span>
-                  <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="block truncate text-xs text-zinc-600 dark:text-zinc-400">
                     {[c.ref.authors, c.ref.year, c.ref.venue]
                       .filter(Boolean)
                       .join(" · ")}
@@ -1038,7 +1037,7 @@ export default function SnowballClient({
               <p className="mb-1 text-sm font-medium text-zinc-800 dark:text-zinc-200">
                 Or add one reference by hand
               </p>
-              <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
                 Databases only export references they index; anything in the
                 reference list without a document link (books, reports, grey
                 literature) can be typed in here. Abstract lookup runs
@@ -1049,20 +1048,20 @@ export default function SnowballClient({
                   value={mTitle}
                   onChange={(e) => setMTitle(e.target.value)}
                   placeholder="Title (required)"
-                  className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                 />
                 <div className="flex gap-2">
                   <input
                     value={mAuthors}
                     onChange={(e) => setMAuthors(e.target.value)}
                     placeholder="Authors (Last, F.; Last, F.)"
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                   />
                   <input
                     value={mYear}
                     onChange={(e) => setMYear(e.target.value)}
                     placeholder="Year"
-                    className="w-20 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                    className="w-20 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -1070,7 +1069,7 @@ export default function SnowballClient({
                     value={mDoi}
                     onChange={(e) => setMDoi(e.target.value)}
                     placeholder="DOI (optional)"
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                   />
                   <button
                     onClick={addManualRef}

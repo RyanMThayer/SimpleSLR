@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { card } from "@/lib/ui";
 import { uploadFulltext } from "@/lib/fulltext";
 import { extractFirstPagesText, matchRecord } from "@/lib/pdfMatch";
 import type { RecordRow } from "@/lib/types";
@@ -157,9 +158,7 @@ export default function BulkPdfUpload({
     (r) => r.status === "ready" && !r.selectedId
   ).length;
 
-  const card =
-    "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
-
+  
   // Margins and placement are the parent's concern: the collapsed
   // button sits inline in the records toolbar, the open card spans the
   // full row.
@@ -199,7 +198,7 @@ export default function BulkPdfUpload({
             setOpen(false);
             setRows([]);
           }}
-          className="text-xs text-zinc-400 underline underline-offset-2"
+          className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
         >
           close
         </button>
@@ -244,7 +243,7 @@ export default function BulkPdfUpload({
                         : row.matchLabel === "no match" ||
                           row.matchLabel.includes("verify")
                         ? "text-amber-600"
-                        : "text-zinc-400"
+                        : "text-zinc-500 dark:text-zinc-400"
                   }
                 >
                   {row.status === "parsing"
@@ -281,7 +280,7 @@ export default function BulkPdfUpload({
                   </select>
                 )}
                 {row.note && (
-                  <span className="w-full text-zinc-400">{row.note}</span>
+                  <span className="w-full text-zinc-500 dark:text-zinc-400">{row.note}</span>
                 )}
               </div>
             ))}
@@ -290,7 +289,7 @@ export default function BulkPdfUpload({
             <button
               onClick={uploadAll}
               disabled={uploadingAll || processing || readyCount === 0}
-              className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             >
               {uploadingAll
                 ? "Uploading..."

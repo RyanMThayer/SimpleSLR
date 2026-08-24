@@ -17,7 +17,7 @@ export default function Home() {
         {configured ? (
           <Link
             href="/login"
-            className="flex h-12 items-center justify-center rounded-full bg-zinc-900 px-8 text-base font-medium text-zinc-50 transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="flex h-12 items-center justify-center rounded-full bg-teal-700 px-8 text-base font-medium text-zinc-50 transition-colors hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
           >
             Go
           </Link>

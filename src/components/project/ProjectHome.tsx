@@ -278,7 +278,7 @@ export default function ProjectHome({
   const tile =
     "rounded-xl border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600";
   const rqInput =
-    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
+    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
@@ -287,7 +287,7 @@ export default function ProjectHome({
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             {project.name}
           </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             {activeCount} active records · {dupCount} duplicates
             {unassigned > 0 && <> · {unassigned} unassigned</>}
           </p>
@@ -303,7 +303,7 @@ export default function ProjectHome({
 
       <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             Research objective and questions
           </h2>
           {!editingRq ? (
@@ -328,7 +328,7 @@ export default function ProjectHome({
                   setObjective(project.research_objective ?? "");
                   setQuestions(project.research_question ?? "");
                 }}
-                className="text-xs text-zinc-400 underline underline-offset-2"
+                className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
               >
                 Cancel
               </button>
@@ -361,7 +361,7 @@ export default function ProjectHome({
             {objective ? (
               <p className="text-zinc-800 dark:text-zinc-200">{objective}</p>
             ) : (
-              <p className="text-sm italic text-zinc-400">
+              <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
                 No research objective yet. It anchors the search string and the
                 criteria, so add it early.
               </p>
@@ -375,7 +375,7 @@ export default function ProjectHome({
                 ))}
               </div>
             ) : (
-              <p className="text-sm italic text-zinc-400">
+              <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
                 No research questions yet.
               </p>
             )}
@@ -386,37 +386,37 @@ export default function ProjectHome({
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link href={`/projects/${project.id}/discovery`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Discovery</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Search string, databases, import
           </p>
         </Link>
         <Link href={`/projects/${project.id}/screen`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Screen</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Title/abstract and full text stages
           </p>
         </Link>
         <Link href={`/projects/${project.id}/records`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Records</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Browse, search, and audit
           </p>
         </Link>
         <Link href={`/projects/${project.id}/duplicates`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Duplicates</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Review near match pairs
           </p>
         </Link>
         <Link href={`/projects/${project.id}/snowball`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Snowball</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Backward and forward citation search
           </p>
         </Link>
         <Link href={`/projects/${project.id}/concepts`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Concepts</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Webster and Watson concept matrix
           </p>
         </Link>
@@ -424,13 +424,13 @@ export default function ProjectHome({
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
             PRISMA and exports
           </h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Flow diagram, RIS, CSV, backup
           </p>
         </Link>
         <Link href={`/projects/${project.id}/settings`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Settings</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Name and highlight keywords
           </p>
         </Link>
@@ -444,7 +444,7 @@ export default function ProjectHome({
           <button
             onClick={distribute}
             disabled={distributing || unassigned === 0}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             title="Split all unassigned records evenly among team members"
           >
             {distributing ? "Distributing..." : "Distribute unassigned"}
@@ -470,23 +470,23 @@ export default function ProjectHome({
                   {m.profiles?.display_name ?? m.profiles?.email ?? "member"}
                   {m.user_id === userId && " (you)"}
                   {m.role === "owner" && (
-                    <span className="ml-1 text-xs text-zinc-400">owner</span>
+                    <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-400">owner</span>
                   )}
                 </span>
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
                   <div
-                    className="h-full rounded-full bg-emerald-500"
+                    className="h-full rounded-full bg-teal-600"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <span className="w-28 text-right text-sm text-zinc-500 dark:text-zinc-400">
+                <span className="w-28 text-right text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
                   {m.done} / {m.assigned}
                 </span>
               </Link>
             );
           })}
           {members.length === 0 && (
-            <p className="px-5 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="px-5 py-4 text-sm text-zinc-600 dark:text-zinc-400">
               Loading members...
             </p>
           )}
@@ -501,20 +501,20 @@ export default function ProjectHome({
           <button
             onClick={distributeFt}
             disabled={distributingFt || ftUnassignedIds.length === 0}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             title="Split the unassigned full text records evenly among team members"
           >
             {distributingFt ? "Distributing..." : "Distribute full text"}
           </button>
         </div>
-        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
           {ftEligible} record(s) included at title/abstract ·{" "}
           {ftUnassignedIds.length} unassigned · {ftNotRetrieved} not
           retrievable
         </p>
         <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           {ftEligible === 0 ? (
-            <p className="px-5 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="px-5 py-4 text-sm text-zinc-600 dark:text-zinc-400">
               Nothing has reached full text yet. Records arrive here once the
               team includes them at the title and abstract stage.
             </p>
@@ -541,7 +541,7 @@ export default function ProjectHome({
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <span className="w-28 text-right text-sm text-zinc-500 dark:text-zinc-400">
+                  <span className="w-28 text-right text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
                     {m.ftDone} / {m.ftAssigned}
                   </span>
                 </Link>

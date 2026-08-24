@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { card } from "@/lib/ui";
 import { outcomeOf } from "@/lib/outcomes";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import {
@@ -518,9 +519,7 @@ export default function ConceptsClient({
   // Styles
   // ------------------------------------------------------------------
 
-  const card =
-    "rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900";
-  const ghostBtn =
+    const ghostBtn =
     "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
   const inputCls =
     "rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100";
@@ -589,11 +588,11 @@ export default function ConceptsClient({
           >
             &ldquo;{e.quote}&rdquo;
             {e.page !== null && (
-              <span className="text-zinc-400"> (p. {e.page})</span>
+              <span className="text-zinc-500 dark:text-zinc-400"> (p. {e.page})</span>
             )}{" "}
             <button
               onClick={() => deleteExcerpt(e)}
-              className="text-zinc-400 hover:text-red-600"
+              className="text-zinc-500 dark:text-zinc-400 hover:text-red-600"
               title="Remove quote"
             >
               &times;
@@ -620,7 +619,7 @@ export default function ConceptsClient({
           <button onClick={() => setCodingId(null)} className={ghostBtn}>
             &larr; Back to matrix
           </button>
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">
             Paper {idx + 1} of {list.length}
           </span>
           {ftIncluded.has(codingRecord.id) && (
@@ -657,7 +656,7 @@ export default function ConceptsClient({
               <h1 className="text-lg font-semibold leading-6 text-zinc-900 dark:text-zinc-50">
                 {codingRecord.title}
               </h1>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
                 {[codingRecord.authors, codingRecord.year, codingRecord.venue]
                   .filter(Boolean)
                   .join(" · ")}
@@ -690,7 +689,7 @@ export default function ConceptsClient({
                     {codingRecord.abstract}
                   </p>
                 ) : (
-                  <p className="mt-3 text-sm italic text-zinc-400">
+                  <p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">
                     No abstract in the export for this record.
                   </p>
                 ))}
@@ -701,9 +700,9 @@ export default function ConceptsClient({
                   className="mt-3 h-[75vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"
                 />
               ) : codingRecord.fulltext_path ? (
-                <p className="mt-3 text-sm text-zinc-400">Loading PDF...</p>
+                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading PDF...</p>
               ) : (
-                <p className="mt-3 text-sm text-zinc-400">
+                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
                   No PDF stored for this paper; upload one in the full text
                   screening room to read it here.
                 </p>
@@ -809,7 +808,7 @@ export default function ConceptsClient({
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Concept matrix
       </h1>
-      <p className="mb-6 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="mb-6 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
         Webster and Watson&apos;s concept centric synthesis: while reading a
         paper, tick the concepts it discusses and paste passages as evidence.
         The concept list is shared live with your whole team; add, rename,
@@ -868,7 +867,7 @@ export default function ConceptsClient({
           Concepts ({concepts.length})
         </h2>
         {concepts.length === 0 && (
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
             No concepts yet. Add your first ones below
             {groupSeedLabels.length > 0 && (
               <>
@@ -924,7 +923,7 @@ export default function ConceptsClient({
                   >
                     {c.label}
                     {c.description && (
-                      <span className="ml-2 text-xs text-zinc-400">
+                      <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
                         {c.description}
                       </span>
                     )}
@@ -964,7 +963,7 @@ export default function ConceptsClient({
                   </select>
                   <button
                     onClick={() => deleteConcept(c)}
-                    className="text-sm text-zinc-400 transition-colors hover:text-red-600"
+                    className="text-sm text-zinc-500 dark:text-zinc-400 transition-colors hover:text-red-600"
                     title="Delete concept"
                   >
                     &times;
@@ -1005,15 +1004,15 @@ export default function ConceptsClient({
           Matrix ({shownRecords.length} papers)
         </h2>
         {records === null ? (
-          <p className="text-sm text-zinc-400">Loading...</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading...</p>
         ) : shownRecords.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             {rowFilter === "included"
               ? "No papers are included after full text yet; switch to the whole reading set above to start coding while you read."
               : "No papers have passed title/abstract screening yet."}
           </p>
         ) : concepts.length === 0 ? (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Add a first concept above, then open a paper with Code to start
             ticking.
           </p>
@@ -1022,7 +1021,7 @@ export default function ConceptsClient({
             <table className="w-full border-separate border-spacing-0 text-sm">
               <thead>
                 <tr>
-                  <th className="sticky left-0 top-0 z-20 bg-white px-2 pb-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-400 dark:bg-zinc-900">
+                  <th className="sticky left-0 top-0 z-20 bg-white px-2 pb-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400 dark:bg-zinc-900">
                     Paper
                   </th>
                   {concepts.map((c) => (
@@ -1047,7 +1046,7 @@ export default function ConceptsClient({
                       <span className="block max-w-64 truncate text-zinc-800 dark:text-zinc-200">
                         {r.title}
                       </span>
-                      <span className="text-xs text-zinc-400">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
                         {[r.year, ftIncluded.has(r.id) ? "included" : null]
                           .filter(Boolean)
                           .join(" · ")}
