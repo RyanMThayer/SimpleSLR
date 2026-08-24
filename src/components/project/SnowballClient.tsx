@@ -69,6 +69,13 @@ export default function SnowballClient({
   const [fiError, setFiError] = useState<string | null>(null);
   const [fiBusy, setFiBusy] = useState(false);
   const fiInputRef = useRef<HTMLInputElement | null>(null);
+  // Manual single-reference entry (for Scopus "secondary documents"
+  // and other references no database will export)
+  const [mTitle, setMTitle] = useState("");
+  const [mAuthors, setMAuthors] = useState("");
+  const [mYear, setMYear] = useState("");
+  const [mDoi, setMDoi] = useState("");
+  const [mNote, setMNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -274,20 +281,51 @@ export default function SnowballClient({
    * plausibility guard, automatic enrichment.
    */
   async function importFileRefs() {
+    if (!fileSeed || !fiRefs || fiRefs.length === 0 || fiBusy) return;
+    await importRefsForSeed(fileSeed, fiDir, fiRefs, fiName, true);
+  }
+
+  async function addManualRef() {
     const seed = fileSeed;
-    if (!seed || !fiRefs || fiRefs.length === 0 || fiBusy) return;
+    if (!seed || !mTitle.trim() || fiBusy) return;
+    const yearNum = parseInt(mYear, 10);
+    const ref: ParsedRef = {
+      title: mTitle.trim(),
+      authors: mAuthors.trim() || null,
+      year: Number.isFinite(yearNum) ? yearNum : null,
+      venue: null,
+      abstract: null,
+      doi: mDoi.trim() || null,
+      url: null,
+    };
+    await importRefsForSeed(seed, fiDir, [ref], "manual entry", false);
+    setMNote(`Added "${ref.title.slice(0, 60)}" as ${fiDir}.`);
+    setMTitle("");
+    setMAuthors("");
+    setMYear("");
+    setMDoi("");
+  }
+
+  async function importRefsForSeed(
+    seed: RecordRow,
+    dir: Direction,
+    refs: ParsedRef[],
+    fileLabel: string,
+    close: boolean
+  ) {
+    if (fiBusy) return;
     setFiBusy(true);
     setError(null);
     const supabase = createClient();
     const stamp = new Date().toISOString().slice(0, 10);
     const origin =
-      fiDir === "backward" ? "snowball_backward" : "snowball_forward";
+      dir === "backward" ? "snowball_backward" : "snowball_forward";
     const { data: batch, error: bErr } = await supabase
       .from("import_batches")
       .insert({
         project_id: projectId,
-        source_label: `Snowball ${fiDir} file ${stamp}`,
-        filename: fiName,
+        source_label: `Snowball ${dir} file ${stamp}`,
+        filename: fileLabel,
         imported_by: userId,
         origin,
         seed_record_id: seed.id,
@@ -315,7 +353,7 @@ export default function SnowballClient({
     let imported = 0;
     let duplicates = 0;
     let linksMissing = false;
-    const rows = fiRefs.map((ref) => {
+    const rows = refs.map((ref) => {
       const norm_doi = normalizeDoi(ref.doi);
       const norm_title = normalizeTitle(ref.title);
       const info = { tokens: authorTokens(ref.authors), year: ref.year };
@@ -344,7 +382,7 @@ export default function SnowballClient({
         abstract: plausibleAbstract(ref.abstract) ? ref.abstract : null,
         doi: ref.doi,
         url: ref.url,
-        source_label: `Snowball ${fiDir}`,
+        source_label: `Snowball ${dir}`,
         status: isDup ? "duplicate" : "active",
         norm_doi,
         norm_title,
@@ -384,7 +422,7 @@ export default function SnowballClient({
         project_id: projectId,
         record_id: row.id,
         seed_record_id: seed.id,
-        direction: fiDir,
+        direction: dir,
       }));
       if (linkRows.length > 0) {
         const { error: lkErr } = await supabase
@@ -403,7 +441,7 @@ export default function SnowballClient({
       .eq("id", batch.id);
     await supabase
       .from("import_batches")
-      .update({ raw_hit_count: fiRefs.length })
+      .update({ raw_hit_count: refs.length })
       .eq("id", batch.id);
 
     let absNote = "";
@@ -432,10 +470,12 @@ export default function SnowballClient({
     }
 
     setFiBusy(false);
-    setFileSeed(null);
-    setFiRefs(null);
+    if (close) {
+      setFileSeed(null);
+      setFiRefs(null);
+    }
     setResult(
-      `Imported ${imported + duplicates} record(s) from ${fiName} as ${fiDir} snowballing from "${seed.title.slice(0, 50)}": ${imported} new, ${duplicates} marked as duplicates. They join title/abstract screening as usual.${
+      `Imported ${imported + duplicates} record(s) from ${fileLabel} as ${dir} snowballing from "${seed.title.slice(0, 50)}": ${imported} new, ${duplicates} marked as duplicates. They join title/abstract screening as usual.${
         linksMissing
           ? " (Per seed provenance was not recorded: run supabase/migrations/0010_snowball_links.sql.)"
           : ""
@@ -756,6 +796,7 @@ export default function SnowballClient({
                     setFiRefs(null);
                     setFiName("");
                     setFiError(null);
+                    setMNote(null);
                   }}
                   title="Import this paper's references or cited-by list from a Scopus / Web of Science file export"
                   className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
@@ -993,6 +1034,59 @@ export default function SnowballClient({
                 {fiError}
               </p>
             )}
+            <div className="mb-4 rounded-lg border border-zinc-100 p-3 dark:border-zinc-800">
+              <p className="mb-1 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                Or add one reference by hand
+              </p>
+              <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+                Databases only export references they index; anything in the
+                reference list without a document link (books, reports, grey
+                literature) can be typed in here. Abstract lookup runs
+                automatically on the DOI or title.
+              </p>
+              <div className="flex flex-col gap-2">
+                <input
+                  value={mTitle}
+                  onChange={(e) => setMTitle(e.target.value)}
+                  placeholder="Title (required)"
+                  className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                />
+                <div className="flex gap-2">
+                  <input
+                    value={mAuthors}
+                    onChange={(e) => setMAuthors(e.target.value)}
+                    placeholder="Authors (Last, F.; Last, F.)"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  />
+                  <input
+                    value={mYear}
+                    onChange={(e) => setMYear(e.target.value)}
+                    placeholder="Year"
+                    className="w-20 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={mDoi}
+                    onChange={(e) => setMDoi(e.target.value)}
+                    placeholder="DOI (optional)"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  />
+                  <button
+                    onClick={addManualRef}
+                    disabled={!mTitle.trim() || fiBusy}
+                    className={ghostBtn}
+                  >
+                    {fiBusy ? "Adding..." : `Add as ${fiDir}`}
+                  </button>
+                </div>
+                {mNote && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    {mNote}
+                  </p>
+                )}
+              </div>
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={importFileRefs}
