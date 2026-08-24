@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { outcomeOf } from "@/lib/outcomes";
@@ -48,6 +48,8 @@ export default function SnowballClient({
   const [selectedSeeds, setSelectedSeeds] = useState<Set<string>>(new Set());
   const [dirBack, setDirBack] = useState(true);
   const [dirFwd, setDirFwd] = useState(true);
+  const [fwdNewest, setFwdNewest] = useState(true);
+  const [candSort, setCandSort] = useState<"year" | "cited">("year");
   const [corpus, setCorpus] = useState<CorpusKey[]>([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -166,17 +168,23 @@ export default function SnowballClient({
         };
         if (dirBack) {
           setProgress(`Backward from ${label}...`);
-          (await fetchReferenced(work)).forEach((w) => add(w, "backward"));
+          const refs = await fetchReferenced(work);
+          refs.forEach((w) => add(w, "backward"));
+          newNotes.push(
+            `Backward from ${label}: ${work.referenced_works?.length ?? refs.length} references, ${refs.length} resolvable in OpenAlex.`
+          );
         }
         if (dirFwd) {
           setProgress(`Forward from ${label}...`);
-          const fwd = await fetchCiting(work.id);
+          const fwd = await fetchCiting(work.id, { newestFirst: fwdNewest });
           fwd.works.forEach((w) => add(w, "forward"));
-          if (fwd.truncated) {
-            newNotes.push(
-              `${label} has ${fwd.total} citing works; loaded the ${fwd.works.length} most cited.`
-            );
-          }
+          newNotes.push(
+            `Forward from ${label}: ${fwd.total} citing works in OpenAlex${
+              fwd.truncated
+                ? `; loaded the ${fwd.works.length} ${fwdNewest ? "newest" : "most cited"}`
+                : ""
+            }.`
+          );
         }
       }
     } catch (e) {
@@ -203,10 +211,6 @@ export default function SnowballClient({
         // all candidates and let formal screening decide.
         selected: !existing,
       };
-    });
-    list.sort((a, b) => {
-      if (a.existing !== b.existing) return a.existing ? 1 : -1;
-      return b.citedBy - a.citedBy;
     });
     setCandidates(list);
     setNotes(newNotes);
@@ -416,6 +420,19 @@ export default function SnowballClient({
     load();
   }
 
+  const sortedCandidates = useMemo(() => {
+    if (!candidates) return null;
+    const copy = [...candidates];
+    copy.sort((a, b) => {
+      if (a.existing !== b.existing) return a.existing ? 1 : -1;
+      if (candSort === "year") {
+        return (b.ref.year ?? -1) - (a.ref.year ?? -1) || b.citedBy - a.citedBy;
+      }
+      return b.citedBy - a.citedBy;
+    });
+    return copy;
+  }, [candidates, candSort]);
+
   const newCount = candidates?.filter((c) => !c.existing).length ?? 0;
   const existingCount = candidates?.filter((c) => c.existing).length ?? 0;
   const selectedCount = candidates?.filter((c) => c.selected && !c.existing).length ?? 0;
@@ -518,6 +535,17 @@ export default function SnowballClient({
             />
             Forward (citing papers)
           </label>
+          {dirFwd && (
+            <select
+              value={fwdNewest ? "newest" : "cited"}
+              onChange={(e) => setFwdNewest(e.target.value === "newest")}
+              className="h-8 rounded-lg border border-zinc-300 bg-white px-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              title="Which citing papers to keep when a seed has more than 400"
+            >
+              <option value="newest">Forward: keep newest</option>
+              <option value="cited">Forward: keep most cited</option>
+            </select>
+          )}
           <button
             onClick={run}
             disabled={running || selectedSeeds.size === 0 || (!dirBack && !dirFwd)}
@@ -547,6 +575,14 @@ export default function SnowballClient({
             <h2 className="mr-auto text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Candidates: {newCount} new, {existingCount} already in corpus
             </h2>
+            <select
+              value={candSort}
+              onChange={(e) => setCandSort(e.target.value as "year" | "cited")}
+              className="h-8 rounded-lg border border-zinc-300 bg-white px-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              <option value="year">Sort: newest first</option>
+              <option value="cited">Sort: most cited first</option>
+            </select>
             <button
               onClick={() =>
                 setCandidates((cs) =>
@@ -575,7 +611,7 @@ export default function SnowballClient({
           </p>
 
           <div className="mb-3 flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
-            {candidates.map((c) => (
+            {(sortedCandidates ?? []).map((c) => (
               <label
                 key={c.key}
                 className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm ${

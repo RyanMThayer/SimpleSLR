@@ -180,11 +180,19 @@ export type ForwardResult = {
   truncated: boolean;
 };
 
-/** Works citing the given work, most cited first, capped. */
+/**
+ * Works citing the given work, capped. `newestFirst` keeps the most
+ * recent citers when a mega cited seed exceeds the cap; otherwise the
+ * most cited citers are kept.
+ */
 export async function fetchCiting(
   workId: string,
-  cap = 400
+  opts: { cap?: number; newestFirst?: boolean } = {}
 ): Promise<ForwardResult> {
+  const cap = opts.cap ?? 400;
+  const sort = opts.newestFirst
+    ? "publication_date:desc"
+    : "cited_by_count:desc";
   const works: OaWork[] = [];
   let cursor = "*";
   let total = 0;
@@ -193,7 +201,7 @@ export async function fetchCiting(
       results: OaWork[];
       meta: { count: number; next_cursor: string | null };
     }>(
-      `works?filter=cites:${shortId(workId)}&sort=cited_by_count:desc&per-page=200&cursor=${encodeURIComponent(cursor)}&select=${SELECT}`
+      `works?filter=cites:${shortId(workId)}&sort=${sort}&per-page=200&cursor=${encodeURIComponent(cursor)}&select=${SELECT}`
     );
     total = res.meta?.count ?? works.length;
     works.push(...(res.results ?? []));
