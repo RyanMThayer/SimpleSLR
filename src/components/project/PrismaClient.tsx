@@ -288,12 +288,18 @@ function mkBox(x: number, w: number, lines: string[]): Omit<Box, "y"> {
   return { x, w, h: wrapped.length * LINE + PAD * 2, lines: wrapped };
 }
 
-function reasonLines(arm: ArmCounts): string[] {
+/**
+ * The "Reports excluded" side box. A genuine zero reads as an explicit
+ * n = 0 rather than a placeholder: all full text reports passing, or
+ * none reaching the stage at all, are real reportable outcomes.
+ */
+function reportsExcludedLines(arm: ArmCounts): string[] {
+  if (arm.ftExcluded === 0) return ["Reports excluded (n = 0)"];
   const lines = arm.ftExcludedByReason
     .slice(0, 12)
     .map((r) => `${r.label} (n = ${r.count})`);
   if (arm.ftExcludedByReason.length > 12) lines.push("and more reasons");
-  return lines.length ? lines : ["(none yet)"];
+  return [`Reports excluded (n = ${arm.ftExcluded}):`, ...lines];
 }
 
 function sourceLines(c: Counts): string[] {
@@ -396,7 +402,7 @@ function layoutSingleArm(c: Counts): Diagram {
     ],
     [
       mkBox(MAIN_X, MAIN_W, ["Reports assessed for eligibility", `(n = ${c.db.assessed})`]),
-      mkBox(SIDE_X, SIDE_W, ["Reports excluded:", ...reasonLines(c.db)]),
+      mkBox(SIDE_X, SIDE_W, reportsExcludedLines(c.db)),
     ],
     [
       mkBox(MAIN_X, MAIN_W, [
@@ -506,9 +512,9 @@ function layoutTwoArms(c: Counts): Diagram {
     ],
     [
       mkBox(MAIN_X, MAIN_W, ["Reports assessed for eligibility", `(n = ${c.db.assessed})`]),
-      mkBox(S1_X, S1_W, ["Reports excluded:", ...reasonLines(c.db)]),
+      mkBox(S1_X, S1_W, reportsExcludedLines(c.db)),
       mkBox(OTH_X, OTH_W, ["Reports assessed for eligibility", `(n = ${c.other.assessed})`]),
-      mkBox(S2_X, S2_W, ["Reports excluded:", ...reasonLines(c.other)]),
+      mkBox(S2_X, S2_W, reportsExcludedLines(c.other)),
     ],
     [
       mkBox(MAIN_X, MAIN_W, [

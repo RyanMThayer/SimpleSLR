@@ -64,12 +64,16 @@ export default function ProjectHome({
     setDupCount(dup.count ?? 0);
     setUnassigned(unas.count ?? 0);
 
-    // Full text eligibility: team level title/abstract includes.
+    // Full text eligibility: team level title/abstract includes. The
+    // per member sets track who decided what, so progress counts only
+    // decisions on records that still exist and are still active
+    // (decisions on later deduplicated records must not inflate "done").
     const taByRecord = new Map<string, { decision: string }[]>();
+    const taDecidedBy = new Map<string, Set<string>>();
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase
         .from("screening_decisions")
-        .select("record_id, decision")
+        .select("record_id, decision, decided_by")
         .eq("project_id", project.id)
         .eq("stage", "title_abstract")
         .range(from, from + 999);
@@ -77,11 +81,30 @@ export default function ProjectHome({
         const list = taByRecord.get(d.record_id) ?? [];
         list.push(d);
         taByRecord.set(d.record_id, list);
+        const set = taDecidedBy.get(d.decided_by) ?? new Set<string>();
+        set.add(d.record_id);
+        taDecidedBy.set(d.decided_by, set);
+      });
+      if (!data || data.length < 1000) break;
+    }
+    const ftDecidedBy = new Map<string, Set<string>>();
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase
+        .from("screening_decisions")
+        .select("record_id, decided_by")
+        .eq("project_id", project.id)
+        .eq("stage", "full_text")
+        .range(from, from + 999);
+      (data ?? []).forEach((d) => {
+        const set = ftDecidedBy.get(d.decided_by) ?? new Set<string>();
+        set.add(d.record_id);
+        ftDecidedBy.set(d.decided_by, set);
       });
       if (!data || data.length < 1000) break;
     }
     type Slim = {
       id: string;
+      assigned_to: string | null;
       ft_assigned_to: string | null;
       retrieval_status: string | null;
     };
@@ -89,7 +112,7 @@ export default function ProjectHome({
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase
         .from("records")
-        .select("id, ft_assigned_to, retrieval_status")
+        .select("id, assigned_to, ft_assigned_to, retrieval_status")
         .eq("project_id", project.id)
         .eq("status", "active")
         .range(from, from + 999);
@@ -108,48 +131,39 @@ export default function ProjectHome({
         .filter((r) => r.ft_assigned_to === null && r.retrieval_status === null)
         .map((r) => r.id)
     );
-    const ftAssignedBy = new Map<string, number>();
-    eligible.forEach((r) => {
-      if (r.ft_assigned_to && r.retrieval_status === null) {
-        ftAssignedBy.set(
-          r.ft_assigned_to,
-          (ftAssignedBy.get(r.ft_assigned_to) ?? 0) + 1
-        );
-      }
-    });
 
     const memberRows = (mem.data ?? []) as ProjectMember[];
-    const progress: MemberProgress[] = await Promise.all(
-      memberRows.map(async (m) => {
-        const [assigned, done, ftDone] = await Promise.all([
-          supabase
-            .from("records")
-            .select("id", { count: "exact", head: true })
-            .eq("project_id", project.id)
-            .eq("status", "active")
-            .eq("assigned_to", m.user_id),
-          supabase
-            .from("screening_decisions")
-            .select("id", { count: "exact", head: true })
-            .eq("project_id", project.id)
-            .eq("stage", "title_abstract")
-            .eq("decided_by", m.user_id),
-          supabase
-            .from("screening_decisions")
-            .select("id", { count: "exact", head: true })
-            .eq("project_id", project.id)
-            .eq("stage", "full_text")
-            .eq("decided_by", m.user_id),
-        ]);
-        return {
-          ...m,
-          assigned: assigned.count ?? 0,
-          done: done.count ?? 0,
-          ftAssigned: ftAssignedBy.get(m.user_id) ?? 0,
-          ftDone: ftDone.count ?? 0,
-        };
-      })
-    );
+    const progress: MemberProgress[] = memberRows.map((m) => {
+      // Only decisions on records that are still active count, and pool
+      // screened records (decided while unassigned) join the member's
+      // total, so done can never exceed the total.
+      const taSet = taDecidedBy.get(m.user_id) ?? new Set<string>();
+      const myAssigned = activeSlim.filter((r) => r.assigned_to === m.user_id);
+      const myDecidedActive = activeSlim.filter((r) => taSet.has(r.id));
+      const taUnion = new Set([
+        ...myAssigned.map((r) => r.id),
+        ...myDecidedActive.map((r) => r.id),
+      ]);
+
+      const ftSet = ftDecidedBy.get(m.user_id) ?? new Set<string>();
+      const retrievable = eligible.filter((r) => r.retrieval_status === null);
+      const myFtAssigned = retrievable.filter(
+        (r) => r.ft_assigned_to === m.user_id
+      );
+      const myFtDecided = retrievable.filter((r) => ftSet.has(r.id));
+      const ftUnion = new Set([
+        ...myFtAssigned.map((r) => r.id),
+        ...myFtDecided.map((r) => r.id),
+      ]);
+
+      return {
+        ...m,
+        assigned: taUnion.size,
+        done: myDecidedActive.length,
+        ftAssigned: ftUnion.size,
+        ftDone: myFtDecided.length,
+      };
+    });
     setMembers(progress);
   }, [project.id]);
 
