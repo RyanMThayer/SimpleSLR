@@ -414,6 +414,12 @@ export default function ProjectHome({
             Backward and forward citation search
           </p>
         </Link>
+        <Link href={`/projects/${project.id}/read`} className={tile}>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Reading room</h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Annotate included papers, concept by concept
+          </p>
+        </Link>
         <Link href={`/projects/${project.id}/concepts`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Concepts</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">

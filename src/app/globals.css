@@ -48,3 +48,36 @@ body {
 .dark :where(button, [role="button"], a, select, input, textarea, summary):focus-visible {
   outline-color: var(--color-teal-400);
 }
+
+/*
+ * pdf.js text layer (reading room). Invisible text positioned over the
+ * rendered canvas so real selection and highlight anchoring work. The
+ * page container must set the --scale-factor variable; pdf.js v4+
+ * positions spans with it.
+ */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer ::selection {
+  background: rgba(0, 118, 118, 0.35);
+  color: transparent;
+}

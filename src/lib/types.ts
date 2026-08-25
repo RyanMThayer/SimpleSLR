@@ -191,6 +191,12 @@ export type ConceptExcerpt = {
   record_id: string;
   quote: string;
   page: number | null;
+  /** Anchor (0015): offsets into the page's extracted text, plus up to
+   * 32 chars of context. All null for pasted (non highlighted) quotes. */
+  pos_start: number | null;
+  pos_end: number | null;
+  prefix: string | null;
+  suffix: string | null;
   added_by: string | null;
   created_at: string;
 };
