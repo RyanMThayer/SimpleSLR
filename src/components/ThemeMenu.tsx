@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type Theme = "system" | "light" | "dark";
 
@@ -26,6 +27,63 @@ function applyTheme(t: Theme) {
 export default function ThemeMenu({ email }: { email?: string | null }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
+  // Optional screen name from the user's profile; email is the fallback
+  // identity everywhere.
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameMsg, setNameMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", user.id)
+        .single();
+      if (cancelled) return;
+      const name = (data?.display_name as string | null) ?? null;
+       
+      setDisplayName(name);
+      setNameDraft(name ?? "");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function saveDisplayName() {
+    if (nameBusy) return;
+    const name = nameDraft.trim().slice(0, 60) || null;
+    setNameBusy(true);
+    setNameMsg(null);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setNameBusy(false);
+      return;
+    }
+    const { error } = await supabase
+      .from("profiles")
+      .update({ display_name: name })
+      .eq("id", user.id);
+    setNameBusy(false);
+    if (error) {
+      setNameMsg(error.message);
+      return;
+    }
+    setDisplayName(name);
+    setNameMsg(name ? "Saved." : "Cleared; your email shows again.");
+    window.setTimeout(() => setNameMsg(null), 2500);
+  }
 
   useEffect(() => {
     // Read-on-mount: the stored choice exists only in the browser.
@@ -66,7 +124,8 @@ export default function ThemeMenu({ email }: { email?: string | null }) {
     applyTheme(t);
   }
 
-  const initial = (email ?? "").trim().charAt(0).toUpperCase() || "?";
+  const shown = displayName || email || "";
+  const initial = shown.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div className="relative">
@@ -79,15 +138,45 @@ export default function ThemeMenu({ email }: { email?: string | null }) {
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-700 text-xs font-semibold text-white dark:bg-teal-400 dark:text-teal-950">
           {initial}
         </span>
-        {email && (
-          <span className="hidden max-w-48 truncate sm:inline">{email}</span>
+        {shown && (
+          <span className="hidden max-w-48 truncate sm:inline">{shown}</span>
         )}
         <span className="text-zinc-500 dark:text-zinc-400">▾</span>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-30 mt-1 w-56 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="absolute right-0 z-30 mt-1 w-64 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            <p className="px-2 pb-1 pt-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Display name
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveDisplayName();
+              }}
+              className="mb-1 flex gap-1.5 px-2 pb-1"
+            >
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                placeholder="Optional screen name"
+                maxLength={60}
+                className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+              />
+              <button
+                type="submit"
+                disabled={nameBusy || (nameDraft.trim() || null) === displayName}
+                className="rounded-full border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                Save
+              </button>
+            </form>
+            <p className="px-2 pb-2 text-xs text-zinc-500 dark:text-zinc-400">
+              {nameMsg ??
+                "Shown to teammates instead of your email. Leave empty to use your email."}
+            </p>
+            <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
             <p className="px-2 pb-1 pt-0.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
               Theme
             </p>
