@@ -34,7 +34,9 @@ const MAX_CHARS = 180_000;
 
 type PageRow = { page: number; content: string };
 
-async function extractAllPages(buf: ArrayBuffer): Promise<PageRow[] | null> {
+async function extractAllPages(
+  buf: ArrayBuffer
+): Promise<{ pages: PageRow[] } | { failure: string }> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const task = pdfjs.getDocument({
@@ -56,9 +58,12 @@ async function extractAllPages(buf: ArrayBuffer): Promise<PageRow[] | null> {
       out.push({ page: p, content });
     }
     await task.destroy();
-    return out;
-  } catch {
-    return null;
+    return { pages: out };
+  } catch (e) {
+    // Surface the real cause: an extraction CRASH is a server problem,
+    // not a scanned PDF, and conflating them hid a production bug.
+    console.error("aipass: pdf extraction failed:", e);
+    return { failure: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -215,15 +220,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Could not download the PDF." });
     }
     const extracted = await extractAllPages(await blob.arrayBuffer());
-    if (!extracted || extracted.every((p) => !p.content.trim())) {
+    if ("failure" in extracted) {
+      return NextResponse.json({
+        error: `PDF text extraction failed on the server (${extracted.failure}). This is a server problem, not your PDF.`,
+      });
+    }
+    if (extracted.pages.every((p) => !p.content.trim())) {
       return NextResponse.json({
         error:
           "No text layer in this PDF (likely a scan); the AI pass needs selectable text.",
       });
     }
-    pages = extracted;
+    pages = extracted.pages;
     await supabase.from("record_fulltext").upsert(
-      extracted.map((p) => ({
+      extracted.pages.map((p) => ({
         record_id: recordId,
         project_id: projectId,
         page: p.page,
