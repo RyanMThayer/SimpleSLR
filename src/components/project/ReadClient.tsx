@@ -462,6 +462,7 @@ export default function ReadClient({
   const [suggestions, setSuggestions] = useState<ConceptSuggestion[]>([]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMsg, setAiMsg] = useState<string | null>(null);
+  const [aiErr, setAiErr] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
@@ -985,6 +986,7 @@ export default function ReadClient({
       return;
     }
     setAiBusy(true);
+    setAiErr(false);
     setAiMsg("Reading the paper and looking for concept evidence...");
     try {
       const res = await fetch("/api/aipass", {
@@ -997,9 +999,13 @@ export default function ReadClient({
           model: aiModel,
         }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setAiMsg(data.error);
+      const data = await res.json().catch(() => null);
+      if (!data || data.error) {
+        setAiErr(true);
+        setAiMsg(
+          data?.error ??
+            `The server responded ${res.status}${res.status === 504 ? " (timed out; try again, the extracted text is now cached)" : ""}.`
+        );
       } else {
         const bits = [`${data.suggested} suggestion(s) to review`];
         if (data.droppedUnverified > 0) {
@@ -1009,6 +1015,7 @@ export default function ReadClient({
           bits.push(`${data.droppedDuplicate} already covered`);
         }
         if (data.truncated) bits.push("long paper truncated");
+        setAiErr(false);
         setAiMsg(bits.join(" · ") + ".");
         const supabase = createClient();
         const { data: sugRows } = await supabase
@@ -1019,6 +1026,7 @@ export default function ReadClient({
         setSuggestions((sugRows ?? []) as ConceptSuggestion[]);
       }
     } catch (e) {
+      setAiErr(true);
       setAiMsg(e instanceof Error ? e.message : String(e));
     }
     setAiBusy(false);
@@ -1418,11 +1426,22 @@ export default function ReadClient({
                   </button>
                 </div>
               )}
-              {aiMsg && (
-                <p className="mt-1.5 text-xs text-zinc-600 dark:text-zinc-400">
-                  {aiMsg}
+              {!current?.fulltext_path && (
+                <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  This paper has no PDF attached, so there is nothing for the
+                  AI to read — attach one in the records table first.
                 </p>
               )}
+              {aiMsg &&
+                (aiErr ? (
+                  <p className="mt-1.5 rounded-lg border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                    {aiMsg}
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+                    {aiMsg}
+                  </p>
+                ))}
               {paperSuggestions.length > 0 && (
                 <div className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
                   {paperSuggestions.map((sg) => {
