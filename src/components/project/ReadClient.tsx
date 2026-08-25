@@ -11,7 +11,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
 import { signedFulltextUrl } from "@/lib/fulltext";
-import { buildAnchor, findAnchor } from "@/lib/anchors";
+import { buildAnchor, findAnchor, snapToWords } from "@/lib/anchors";
 import { cleanQuote } from "@/lib/concepts";
 import type {
   Concept,
@@ -236,9 +236,13 @@ function PageView({
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
-    const start = pointToOffset(textDiv, range.startContainer, range.startOffset);
-    const end = pointToOffset(textDiv, range.endContainer, range.endOffset);
-    if (start === null || end === null || start >= end) return;
+    const rawStart = pointToOffset(textDiv, range.startContainer, range.startOffset);
+    const rawEnd = pointToOffset(textDiv, range.endContainer, range.endOffset);
+    if (rawStart === null || rawEnd === null || rawStart >= rawEnd) return;
+    // Forgiving boundaries: a drag that clips half a word still tags
+    // the whole word.
+    const { start, end } = snapToWords(pageText, rawStart, rawEnd);
+    if (start >= end) return;
     const quote = pageText.slice(start, end);
     if (!quote.trim() || quote.length > 4000) return;
     onSelect({ page: pageNo, start, end, quote, x: e.clientX, y: e.clientY });
@@ -257,6 +261,7 @@ function PageView({
           width: size?.w,
           height: size?.h,
           "--scale-factor": scale,
+          "--total-scale-factor": scale,
         } as React.CSSProperties
       }
     >
@@ -313,6 +318,7 @@ export default function ReadClient({
   const pageTexts = useRef<Map<number, string>>(new Map());
   const pageEls = useRef<Map<number, HTMLDivElement | null>>(new Map());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const fitScaleRef = useRef(1.3);
 
   const [sel, setSel] = useState<Sel | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -451,6 +457,7 @@ export default function ReadClient({
       const base = first.getViewport({ scale: 1 });
       const fit = Math.min(2, Math.max(0.6, (w - 24) / base.width));
       if (cancelled) return;
+      fitScaleRef.current = fit;
       setScale(fit);
       setDoc(d);
       setNumPages(d.numPages);
@@ -765,7 +772,40 @@ export default function ReadClient({
                 Loading PDF...
               </p>
             ) : (
-              Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
+              <>
+              <div className="sticky top-0 z-10 mb-2 flex justify-end">
+                <div className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+                  <button
+                    onClick={() =>
+                      setScale((s) => Math.max(0.5, Math.round((s / 1.2) * 100) / 100))
+                    }
+                    className="rounded-full px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    title="Zoom out"
+                  >
+                    −
+                  </button>
+                  <span className="w-12 text-center text-xs tabular-nums text-zinc-600 dark:text-zinc-400">
+                    {Math.round(scale * 100)}%
+                  </span>
+                  <button
+                    onClick={() =>
+                      setScale((s) => Math.min(3, Math.round(s * 1.2 * 100) / 100))
+                    }
+                    className="rounded-full px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    title="Zoom in (larger text is easier to select precisely)"
+                  >
+                    +
+                  </button>
+                  <button
+                    onClick={() => setScale(fitScaleRef.current)}
+                    className="rounded-full px-2 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    title="Fit page width"
+                  >
+                    Fit
+                  </button>
+                </div>
+              </div>
+              {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
                 <PageView
                   key={`${current.id}-${n}`}
                   doc={doc}
@@ -784,7 +824,8 @@ export default function ReadClient({
                   }}
                   registerEl={registerEl}
                 />
-              ))
+              ))}
+              </>
             )}
           </div>
 

@@ -41,6 +41,38 @@ export function buildAnchor(
   };
 }
 
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * Forgiving selection: trim whitespace off the edges, then expand any
+ * boundary that cuts through the middle of a word out to the word's
+ * edge. A sloppy drag still yields a clean quote.
+ */
+export function snapToWords(
+  text: string,
+  start: number,
+  end: number
+): { start: number; end: number } {
+  while (start < end && /\s/.test(text[start])) start++;
+  while (end > start && /\s/.test(text[end - 1])) end--;
+  while (
+    start > 0 &&
+    WORD_CHAR.test(text[start - 1]) &&
+    WORD_CHAR.test(text[start])
+  ) {
+    start--;
+  }
+  while (
+    end < text.length &&
+    end > 0 &&
+    WORD_CHAR.test(text[end]) &&
+    WORD_CHAR.test(text[end - 1])
+  ) {
+    end++;
+  }
+  return { start, end };
+}
+
 /** Longest length for which a ends with what b... (shared boundary). */
 function suffixOverlap(text: string, at: number, prefix: string): number {
   // How many trailing characters of `prefix` appear immediately before

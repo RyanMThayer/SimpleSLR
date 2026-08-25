@@ -50,34 +50,65 @@ body {
 }
 
 /*
- * pdf.js text layer (reading room). Invisible text positioned over the
- * rendered canvas so real selection and highlight anchoring work. The
- * page container must set the --scale-factor variable; pdf.js v4+
- * positions spans with it.
+ * pdf.js text layer (reading room): the invisible selectable text over
+ * the rendered canvas. These rules are the official pdf_viewer.css
+ * text layer subset for pdf.js v6 - the custom property chain
+ * (--total-scale-factor -> --text-scale-factor -> per span
+ * --font-height / --scale-x / --rotate) is what places each glyph box
+ * exactly over its painted glyph, so selection grabs what the eye
+ * aims at. The page wrapper must define --total-scale-factor.
  */
 .textLayer {
+  color-scheme: only light;
   position: absolute;
+  text-align: initial;
   inset: 0;
   overflow: clip;
+  opacity: 1;
   line-height: 1;
-  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
   text-size-adjust: none;
   forced-color-adjust: none;
   transform-origin: 0 0;
   caret-color: CanvasText;
-}
-.textLayer :is(span, br) {
-  color: transparent;
-  position: absolute;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
-}
-.textLayer span.markedContent {
-  top: 0;
-  height: 0;
-}
-.textLayer ::selection {
-  background: rgba(0, 118, 118, 0.35);
-  color: transparent;
+  z-index: 0;
+
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+
+  :is(span, br) {
+    color: transparent;
+    position: absolute;
+    white-space: pre;
+    cursor: text;
+    transform-origin: 0% 0%;
+    user-select: text;
+  }
+
+  > :not(.markedContent),
+  .markedContent span:not(.markedContent) {
+    z-index: 1;
+    --font-height: 0;
+    font-size: calc(var(--text-scale-factor) * var(--font-height));
+    --scale-x: 1;
+    --rotate: 0deg;
+    transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+      scale(var(--min-font-size-inv));
+  }
+
+  .markedContent {
+    display: contents;
+  }
+
+  span[role="img"] {
+    user-select: none;
+    cursor: default;
+  }
+
+  ::selection {
+    background: rgba(0, 118, 118, 0.4);
+    color: transparent;
+  }
 }
