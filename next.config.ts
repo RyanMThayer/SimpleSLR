@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
   // in production. Excluding it makes the runtime require it straight
   // from node_modules, which Vercel's file tracing includes.
   serverExternalPackages: ["pdfjs-dist"],
+  // pdf.js loads its worker via a computed dynamic import that file
+  // tracing cannot see, so ship the whole legacy build with the two
+  // routes that extract PDF text.
+  outputFileTracingIncludes: {
+    "/api/aipass": ["./node_modules/pdfjs-dist/legacy/build/**/*"],
+    "/api/oapdf": ["./node_modules/pdfjs-dist/legacy/build/**/*"],
+  },
 };
 
 export default nextConfig;
