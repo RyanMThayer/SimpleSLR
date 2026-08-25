@@ -166,7 +166,17 @@ type HighlightRect = {
   height: number;
   excerptId: string;
   fill: string;
+  dot: string;
   title: string;
+};
+
+/** The hover chip naming a highlight's concept, anchored to one rect. */
+type HoverTip = {
+  top: number;
+  left: number;
+  height: number;
+  text: string;
+  dot: string;
 };
 
 /** One page's share of a selection; a selection spanning a page break
@@ -228,6 +238,7 @@ function PageView({
   const [sugRects, setSugRects] = useState<
     (PlainRect & { sugId: string; color: string; title: string })[]
   >([]);
+  const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
 
   // Render the page once (canvas + text layer), then report its text.
   useEffect(() => {
@@ -303,6 +314,7 @@ function PageView({
           ...r,
           excerptId: ex.id,
           fill: conceptColor(idx).fill,
+          dot: conceptColor(idx).dot,
           title: `${label} · ${authorName(ex.added_by)}`,
         });
       }
@@ -368,12 +380,66 @@ function PageView({
     setSugRects(out);
   }, [pageText, suggestions, conceptIndex]);
 
+  // The text layer sits above the highlight overlay and captures all
+  // pointer events, so hover and click on highlights are resolved by
+  // hit testing the rects at the page level. This also keeps text
+  // selection working over highlighted passages.
+  function hitAt(e: React.MouseEvent): { tip: HoverTip; excerptId?: string } | null {
+    const wrap = wrapRef.current;
+    if (!wrap) return null;
+    const box = wrap.getBoundingClientRect();
+    const x = e.clientX - box.left;
+    const y = e.clientY - box.top;
+    const inside = (r: PlainRect) =>
+      x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height;
+    for (const r of sugRects) {
+      if (inside(r)) {
+        return {
+          tip: { top: r.top, left: r.left, height: r.height, text: r.title, dot: r.color },
+        };
+      }
+    }
+    for (const r of rects) {
+      if (inside(r)) {
+        return {
+          tip: { top: r.top, left: r.left, height: r.height, text: r.title, dot: r.dot },
+          excerptId: r.excerptId,
+        };
+      }
+    }
+    return null;
+  }
+
+  function handleHover(e: React.MouseEvent) {
+    const hit = hitAt(e);
+    setHoverTip((prev) => {
+      const next = hit?.tip ?? null;
+      if (
+        prev === next ||
+        (prev && next && prev.text === next.text && prev.top === next.top && prev.left === next.left)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }
+
+  function handleClick(e: React.MouseEvent) {
+    const s = window.getSelection();
+    if (s && !s.isCollapsed) return; // a selection, not a click on a highlight
+    const hit = hitAt(e);
+    if (hit?.excerptId) onPickExcerpt(hit.excerptId);
+  }
+
   return (
     <div
       ref={(el) => {
         wrapRef.current = el;
         registerEl(pageNo, el);
       }}
+      onMouseMove={handleHover}
+      onMouseLeave={() => setHoverTip(null)}
+      onClick={handleClick}
       className="relative mx-auto mb-4 bg-white shadow-sm dark:shadow-none"
       style={
         {
@@ -402,9 +468,7 @@ function PageView({
         {rects.map((r, i) => (
           <div
             key={i}
-            title={r.title}
-            onClick={() => onPickExcerpt(r.excerptId)}
-            className={`pointer-events-auto absolute cursor-pointer rounded-[2px] ${
+            className={`absolute rounded-[2px] ${
               flashId === r.excerptId ? "ring-2 ring-teal-600" : ""
             }`}
             style={{
@@ -420,7 +484,6 @@ function PageView({
         {sugRects.map((r, i) => (
           <div
             key={`s${i}`}
-            title={r.title}
             className={`absolute rounded-[2px] ${
               flashId === r.sugId ? "ring-2 ring-teal-600" : ""
             }`}
@@ -433,6 +496,23 @@ function PageView({
             }}
           />
         ))}
+        {hoverTip && (
+          <div
+            className={`pointer-events-none absolute z-20 flex max-w-72 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-800 shadow-md dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 ${
+              hoverTip.top < 32 ? "" : "-translate-y-full"
+            }`}
+            style={{
+              top: hoverTip.top < 32 ? hoverTip.top + hoverTip.height + 4 : hoverTip.top - 4,
+              left: Math.max(0, Math.min(hoverTip.left, (size?.w ?? 600) - 240)),
+            }}
+          >
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: hoverTip.dot }}
+            />
+            <span className="truncate">{hoverTip.text}</span>
+          </div>
+        )}
       </div>
       <div ref={textRef} className="textLayer" />
     </div>
