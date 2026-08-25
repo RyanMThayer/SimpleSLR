@@ -940,12 +940,74 @@ export default function ReadClient({
     setExcerpts((xs) => xs.filter((x) => x.id !== ex.id));
   }
 
-  function jumpToExcerpt(ex: ConceptExcerpt) {
-    if (ex.page != null) {
-      pageEls.current
-        .get(ex.page)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  /**
+   * Scroll so the quote itself sits centered in the viewport, not just
+   * its page: the anchor resolves to the same rects the highlight
+   * paints, and the scroll container is moved to their midpoint. Falls
+   * back to centering the page when the anchor cannot resolve.
+   */
+  function anchorScroll(
+    page: number,
+    ex: {
+      quote: string;
+      pos_start: number | null;
+      pos_end: number | null;
+      prefix: string | null;
+      suffix: string | null;
     }
+  ) {
+    const wrap = pageEls.current.get(page);
+    const viewport = viewportRef.current;
+    const fallback = () =>
+      wrap?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!wrap || !viewport) {
+      fallback();
+      return;
+    }
+    const textDiv = wrap.querySelector(".textLayer") as HTMLElement | null;
+    const pageText = pageTexts.current.get(page);
+    if (
+      !textDiv ||
+      pageText == null ||
+      ex.pos_start == null ||
+      ex.pos_end == null
+    ) {
+      fallback();
+      return;
+    }
+    const hit = findAnchor(pageText, {
+      quote: ex.quote,
+      pos_start: ex.pos_start,
+      pos_end: ex.pos_end,
+      prefix: ex.prefix ?? "",
+      suffix: ex.suffix ?? "",
+    });
+    if (!hit) {
+      fallback();
+      return;
+    }
+    const rects = rectsForOffsets(
+      textDiv,
+      hit.start,
+      hit.end,
+      wrap.getBoundingClientRect()
+    );
+    if (rects.length === 0) {
+      fallback();
+      return;
+    }
+    const top = Math.min(...rects.map((r) => r.top));
+    const bottom = Math.max(...rects.map((r) => r.top + r.height));
+    const wrapTop =
+      wrap.getBoundingClientRect().top -
+      viewport.getBoundingClientRect().top +
+      viewport.scrollTop;
+    const target = wrapTop + (top + bottom) / 2 - viewport.clientHeight / 2;
+    viewport.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }
+
+  function jumpToExcerpt(ex: ConceptExcerpt) {
+    if (ex.page != null) anchorScroll(ex.page, ex);
     setFlashId(ex.id);
     window.setTimeout(() => setFlashId((f) => (f === ex.id ? null : f)), 2000);
   }
@@ -1352,11 +1414,7 @@ export default function ReadClient({
   }
 
   function jumpToSuggestion(sug: ConceptSuggestion) {
-    if (sug.page != null) {
-      pageEls.current
-        .get(sug.page)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    if (sug.page != null) anchorScroll(sug.page, sug);
     setFlashId(sug.id);
     window.setTimeout(() => setFlashId((f) => (f === sug.id ? null : f)), 2000);
   }
