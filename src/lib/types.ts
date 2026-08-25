@@ -201,6 +201,31 @@ export type ConceptExcerpt = {
   created_at: string;
 };
 
+/** AI concept pass output, quarantined until a member accepts it. */
+export type ConceptSuggestion = {
+  id: string;
+  project_id: string;
+  record_id: string;
+  run_id: string;
+  concept_id: string | null;
+  concept_label: string;
+  definition: string | null;
+  quote: string;
+  page: number | null;
+  pos_start: number | null;
+  pos_end: number | null;
+  prefix: string | null;
+  suffix: string | null;
+  note: string | null;
+  status: "pending" | "accepted" | "rejected";
+  model: string | null;
+  created_by: string | null;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  accepted_excerpt_id: string | null;
+};
+
 /** A reference parsed from an uploaded file, before insertion. */
 export type ParsedRef = {
   title: string;

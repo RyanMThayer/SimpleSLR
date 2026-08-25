@@ -16,6 +16,7 @@ import { cleanQuote } from "@/lib/concepts";
 import type {
   Concept,
   ConceptExcerpt,
+  ConceptSuggestion,
   ConceptTag,
   Project,
   RecordRow,
@@ -177,6 +178,7 @@ function PageView({
   authorName,
   flashId,
   pending,
+  suggestions,
   onTextReady,
   onPickExcerpt,
   registerEl,
@@ -190,6 +192,7 @@ function PageView({
   authorName: (id: string | null) => string;
   flashId: string | null;
   pending: { start: number; end: number } | null;
+  suggestions: ConceptSuggestion[];
   onTextReady: (pageNo: number, text: string) => void;
   onPickExcerpt: (id: string) => void;
   registerEl: (pageNo: number, el: HTMLDivElement | null) => void;
@@ -202,6 +205,9 @@ function PageView({
   const [rects, setRects] = useState<HighlightRect[]>([]);
   const [pendingRects, setPendingRects] = useState<
     { top: number; left: number; width: number; height: number }[]
+  >([]);
+  const [sugRects, setSugRects] = useState<
+    (PlainRect & { sugId: string; color: string; title: string })[]
   >([]);
 
   // Render the page once (canvas + text layer), then report its text.
@@ -308,6 +314,41 @@ function PageView({
     setPendingRects(out);
   }, [pending, pageText]);
 
+  // Dashed overlays for pending AI suggestions on this page.
+  useEffect(() => {
+    const out: (PlainRect & { sugId: string; color: string; title: string })[] =
+      [];
+    const textDiv = textRef.current;
+    const wrap = wrapRef.current;
+    if (textDiv && wrap && pageText !== null && suggestions.length > 0) {
+      const wrapBox = wrap.getBoundingClientRect();
+      for (const sg of suggestions) {
+        if (sg.pos_start == null || sg.pos_end == null) continue;
+        const hit = findAnchor(pageText, {
+          quote: sg.quote,
+          pos_start: sg.pos_start,
+          pos_end: sg.pos_end,
+          prefix: sg.prefix ?? "",
+          suffix: sg.suffix ?? "",
+        });
+        if (!hit) continue;
+        const idx = sg.concept_id ? conceptIndex.get(sg.concept_id) : undefined;
+        const color =
+          idx !== undefined ? conceptColor(idx).dot : "hsl(275, 55%, 55%)";
+        for (const r of rectsForOffsets(textDiv, hit.start, hit.end, wrapBox)) {
+          out.push({
+            ...r,
+            sugId: sg.id,
+            color,
+            title: `Suggested: ${sg.concept_label} — accept or reject in the panel`,
+          });
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSugRects(out);
+  }, [pageText, suggestions, conceptIndex]);
+
   return (
     <div
       ref={(el) => {
@@ -357,6 +398,22 @@ function PageView({
             }}
           />
         ))}
+        {sugRects.map((r, i) => (
+          <div
+            key={`s${i}`}
+            title={r.title}
+            className={`absolute rounded-[2px] ${
+              flashId === r.sugId ? "ring-2 ring-teal-600" : ""
+            }`}
+            style={{
+              top: r.top,
+              left: r.left,
+              width: r.width,
+              height: r.height,
+              border: `1.5px dashed ${r.color}`,
+            }}
+          />
+        ))}
       </div>
       <div ref={textRef} className="textLayer" />
     </div>
@@ -381,6 +438,15 @@ export default function ReadClient({
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // AI pass: quarantined suggestions plus the caller's own API key,
+  // which lives only in this browser's localStorage.
+  const [suggestions, setSuggestions] = useState<ConceptSuggestion[]>([]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [editingKey, setEditingKey] = useState(false);
+  const [decidingSug, setDecidingSug] = useState<string | null>(null);
 
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -476,6 +542,13 @@ export default function ReadClient({
       setTags((tRes.data ?? []) as ConceptTag[]);
       setExcerpts((eRes.data ?? []) as ConceptExcerpt[]);
       setNames(nameMap);
+      // Absent before migration 0016; an error here just means none.
+      const { data: sugRows } = await supabase
+        .from("concept_suggestions")
+        .select("*")
+        .eq("project_id", project.id)
+        .order("created_at");
+      setSuggestions((sugRows ?? []) as ConceptSuggestion[]);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -597,6 +670,37 @@ export default function ReadClient({
       ),
     [tags, current?.id]
   );
+  const paperSuggestions = useMemo(
+    () =>
+      suggestions
+        .filter((s) => s.record_id === current?.id && s.status === "pending")
+        .sort(
+          (a, b) =>
+            (a.page ?? 0) - (b.page ?? 0) ||
+            (a.pos_start ?? 0) - (b.pos_start ?? 0)
+        ),
+    [suggestions, current?.id]
+  );
+  const sugsByPage = useMemo(() => {
+    const m = new Map<number, ConceptSuggestion[]>();
+    paperSuggestions.forEach((s) => {
+      if (s.page == null || s.pos_start == null) return;
+      const list = m.get(s.page) ?? [];
+      list.push(s);
+      m.set(s.page, list);
+    });
+    return m;
+  }, [paperSuggestions]);
+
+  const KEY_NAME = "simpleslr-anthropic-key";
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHasKey(Boolean(localStorage.getItem(KEY_NAME)));
+    } catch {
+      // Storage unavailable: the key form stays visible.
+    }
+  }, []);
 
   const onTextReady = useCallback((pageNo: number, text: string) => {
     pageTexts.current.set(pageNo, text);
@@ -812,6 +916,208 @@ export default function ReadClient({
   }
 
   // ------------------------------------------------------------------
+  // AI pass
+  // ------------------------------------------------------------------
+  function saveKey() {
+    const k = keyDraft.trim();
+    if (!k) return;
+    try {
+      localStorage.setItem(KEY_NAME, k);
+      setHasKey(true);
+      setEditingKey(false);
+      setKeyDraft("");
+    } catch {
+      setAiMsg("Could not store the key in this browser.");
+    }
+  }
+
+  async function runAiPass() {
+    if (!current?.fulltext_path || aiBusy) return;
+    let key = "";
+    try {
+      key = localStorage.getItem(KEY_NAME) ?? "";
+    } catch {
+      /* handled below */
+    }
+    if (!key) {
+      setEditingKey(true);
+      return;
+    }
+    setAiBusy(true);
+    setAiMsg("Reading the paper and looking for concept evidence...");
+    try {
+      const res = await fetch("/api/aipass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.id,
+          recordId: current.id,
+          apiKey: key,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setAiMsg(data.error);
+      } else {
+        const bits = [`${data.suggested} suggestion(s) to review`];
+        if (data.droppedUnverified > 0) {
+          bits.push(`${data.droppedUnverified} dropped as unverifiable`);
+        }
+        if (data.droppedDuplicate > 0) {
+          bits.push(`${data.droppedDuplicate} already covered`);
+        }
+        if (data.truncated) bits.push("long paper truncated");
+        setAiMsg(bits.join(" · ") + ".");
+        const supabase = createClient();
+        const { data: sugRows } = await supabase
+          .from("concept_suggestions")
+          .select("*")
+          .eq("project_id", project.id)
+          .order("created_at");
+        setSuggestions((sugRows ?? []) as ConceptSuggestion[]);
+      }
+    } catch (e) {
+      setAiMsg(e instanceof Error ? e.message : String(e));
+    }
+    setAiBusy(false);
+  }
+
+  async function acceptSuggestion(sug: ConceptSuggestion) {
+    if (!current || decidingSug) return;
+    setDecidingSug(sug.id);
+    const supabase = createClient();
+    try {
+      // Resolve or create the concept (a proposed label may match a
+      // concept created since the run).
+      let conceptId = sug.concept_id;
+      if (!conceptId) {
+        const match = concepts.find(
+          (c) =>
+            c.label.trim().toLowerCase() ===
+            sug.concept_label.trim().toLowerCase()
+        );
+        conceptId = match?.id ?? null;
+      }
+      if (!conceptId) {
+        const { data, error: cErr } = await supabase
+          .from("concepts")
+          .insert({
+            project_id: project.id,
+            label: sug.concept_label,
+            description: sug.definition,
+            position: concepts.length,
+            created_by: userId,
+          })
+          .select("*")
+          .single();
+        if (cErr || !data) throw new Error(cErr?.message ?? "concept failed");
+        setConcepts((cs) => [...cs, data as Concept]);
+        conceptId = (data as Concept).id;
+      }
+      const { data: ex, error: exErr } = await supabase
+        .from("concept_excerpts")
+        .insert({
+          project_id: project.id,
+          concept_id: conceptId,
+          record_id: current.id,
+          quote: sug.quote,
+          page: sug.page,
+          pos_start: sug.pos_start,
+          pos_end: sug.pos_end,
+          prefix: sug.prefix,
+          suffix: sug.suffix,
+          added_by: userId,
+        })
+        .select("*")
+        .single();
+      if (exErr || !ex) throw new Error(exErr?.message ?? "excerpt failed");
+      await supabase.from("concept_tags").upsert(
+        {
+          project_id: project.id,
+          concept_id: conceptId,
+          record_id: current.id,
+          tagged_by: userId,
+        },
+        { onConflict: "concept_id,record_id", ignoreDuplicates: true }
+      );
+      const { error: upErr } = await supabase
+        .from("concept_suggestions")
+        .update({
+          status: "accepted",
+          concept_id: conceptId,
+          decided_by: userId,
+          decided_at: new Date().toISOString(),
+          accepted_excerpt_id: (ex as ConceptExcerpt).id,
+        })
+        .eq("id", sug.id);
+      if (upErr) throw new Error(upErr.message);
+      setExcerpts((xs) => [...xs, ex as ConceptExcerpt]);
+      setTags((ts) =>
+        ts.some(
+          (t) => t.concept_id === conceptId && t.record_id === current.id
+        )
+          ? ts
+          : [
+              ...ts,
+              {
+                id: `local-${sug.id}`,
+                project_id: project.id,
+                concept_id: conceptId,
+                record_id: current.id,
+                unit: null,
+                note: null,
+                tagged_by: userId,
+                created_at: new Date().toISOString(),
+              },
+            ]
+      );
+      setSuggestions((ss) =>
+        ss.map((s) =>
+          s.id === sug.id
+            ? { ...s, status: "accepted" as const, concept_id: conceptId }
+            : s
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setDecidingSug(null);
+  }
+
+  async function rejectSuggestion(sug: ConceptSuggestion) {
+    if (decidingSug) return;
+    setDecidingSug(sug.id);
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("concept_suggestions")
+      .update({
+        status: "rejected",
+        decided_by: userId,
+        decided_at: new Date().toISOString(),
+      })
+      .eq("id", sug.id);
+    if (upErr) setError(upErr.message);
+    else {
+      setSuggestions((ss) =>
+        ss.map((s) =>
+          s.id === sug.id ? { ...s, status: "rejected" as const } : s
+        )
+      );
+    }
+    setDecidingSug(null);
+  }
+
+  function jumpToSuggestion(sug: ConceptSuggestion) {
+    if (sug.page != null) {
+      pageEls.current
+        .get(sug.page)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setFlashId(sug.id);
+    window.setTimeout(() => setFlashId((f) => (f === sug.id ? null : f)), 2000);
+  }
+
+  // ------------------------------------------------------------------
   // Rendering
   // ------------------------------------------------------------------
   const filteredConcepts = useMemo(() => {
@@ -941,6 +1247,7 @@ export default function ReadClient({
                   authorName={authorName}
                   flashId={flashId}
                   pending={sel?.parts.find((p) => p.page === n) ?? null}
+                  suggestions={sugsByPage.get(n) ?? []}
                   onTextReady={onTextReady}
                   onPickExcerpt={(id) => {
                     const ex = excerpts.find((x) => x.id === id);
@@ -992,6 +1299,130 @@ export default function ReadClient({
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   {[current.authors, current.year].filter(Boolean).join(" · ")}
                 </p>
+              )}
+            </div>
+
+            {/* ---------------- AI pass ---------------- */}
+            <div className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  AI pass
+                </p>
+                {paperSuggestions.length > 0 && (
+                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                    {paperSuggestions.length} to review
+                  </span>
+                )}
+              </div>
+              {editingKey || !hasKey ? (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                    Paste your Anthropic API key. It stays in this browser
+                    only and is sent straight to the Anthropic API for each
+                    run, never stored on the server.
+                  </p>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="password"
+                      value={keyDraft}
+                      onChange={(e) => setKeyDraft(e.target.value)}
+                      placeholder="sk-ant-..."
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                    />
+                    <button
+                      onClick={saveKey}
+                      disabled={!keyDraft.trim()}
+                      className="rounded-full border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={runAiPass}
+                    disabled={aiBusy || !current?.fulltext_path}
+                    title="Reads this one paper only and suggests concept passages; every suggestion is verified verbatim against the PDF text and waits for your accept or reject."
+                    className="rounded-full bg-teal-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                  >
+                    {aiBusy ? "Reading..." : "Suggest concepts for this paper"}
+                  </button>
+                  <button
+                    onClick={() => setEditingKey(true)}
+                    className="text-xs text-zinc-500 underline underline-offset-2 dark:text-zinc-400"
+                  >
+                    change key
+                  </button>
+                </div>
+              )}
+              {aiMsg && (
+                <p className="mt-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+                  {aiMsg}
+                </p>
+              )}
+              {paperSuggestions.length > 0 && (
+                <div className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
+                  {paperSuggestions.map((sg) => {
+                    const idx = sg.concept_id
+                      ? conceptIndex.get(sg.concept_id)
+                      : undefined;
+                    return (
+                      <div
+                        key={sg.id}
+                        className="rounded-lg border border-dashed border-zinc-300 p-2 text-sm dark:border-zinc-700"
+                      >
+                        <button
+                          onClick={() => jumpToSuggestion(sg)}
+                          className="block w-full text-left"
+                          title={sg.note ?? undefined}
+                        >
+                          <span className="mb-1 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{
+                                backgroundColor:
+                                  idx !== undefined
+                                    ? conceptColor(idx).dot
+                                    : "hsl(275, 55%, 55%)",
+                              }}
+                            />
+                            <span className="truncate font-medium text-zinc-700 dark:text-zinc-300">
+                              {sg.concept_label}
+                            </span>
+                            {!sg.concept_id && (
+                              <span className="shrink-0 rounded-full bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                                new
+                              </span>
+                            )}
+                            <span className="ml-auto shrink-0">
+                              p. {sg.page}
+                            </span>
+                          </span>
+                          <span className="line-clamp-2 text-zinc-700 dark:text-zinc-300">
+                            {cleanQuote(sg.quote)}
+                          </span>
+                        </button>
+                        <div className="mt-1.5 flex gap-2">
+                          <button
+                            onClick={() => acceptSuggestion(sg)}
+                            disabled={decidingSug !== null}
+                            className="rounded-full bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => rejectSuggestion(sg)}
+                            disabled={decidingSug !== null}
+                            className="rounded-full border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
