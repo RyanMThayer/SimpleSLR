@@ -468,6 +468,8 @@ export default function ReadClient({
   const [editingKey, setEditingKey] = useState(false);
   const [aiModel, setAiModel] = useState<AiModelId>("claude-sonnet-5");
   const [decidingSug, setDecidingSug] = useState<string | null>(null);
+  const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
+  const [conceptDraft, setConceptDraft] = useState("");
 
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -946,6 +948,120 @@ export default function ReadClient({
       (e) => e.concept_id === conceptId && e.page != null
     );
     if (first) jumpToExcerpt(first);
+  }
+
+  // ------------------------------------------------------------------
+  // The paper's cell in the matrix: toggle the checkmark directly, and
+  // manage the concept list (rename, delete) without leaving the room.
+  // ------------------------------------------------------------------
+  async function toggleTag(c: Concept) {
+    if (!current) return;
+    const n = countByConcept.get(c.id) ?? 0;
+    const checked = taggedConcepts.has(c.id) || n > 0;
+    const supabase = createClient();
+    if (!checked) {
+      const { data, error: tErr } = await supabase
+        .from("concept_tags")
+        .insert({
+          project_id: project.id,
+          concept_id: c.id,
+          record_id: current.id,
+          tagged_by: userId,
+        })
+        .select("*")
+        .single();
+      if (tErr || !data) {
+        setError(tErr?.message ?? "Could not add the checkmark.");
+        return;
+      }
+      setTags((ts) => [...ts, data as ConceptTag]);
+      return;
+    }
+    if (
+      n > 0 &&
+      !window.confirm(
+        `Uncheck "${c.label}" for this paper? Its ${n} excerpt(s) here are removed too.`
+      )
+    ) {
+      return;
+    }
+    if (n > 0) {
+      const { error: exErr } = await supabase
+        .from("concept_excerpts")
+        .delete()
+        .eq("record_id", current.id)
+        .eq("concept_id", c.id);
+      if (exErr) {
+        setError(exErr.message);
+        return;
+      }
+    }
+    const { error: tErr } = await supabase
+      .from("concept_tags")
+      .delete()
+      .eq("record_id", current.id)
+      .eq("concept_id", c.id);
+    if (tErr) {
+      setError(tErr.message);
+      return;
+    }
+    setExcerpts((xs) =>
+      xs.filter(
+        (x) => !(x.record_id === current.id && x.concept_id === c.id)
+      )
+    );
+    setTags((ts) =>
+      ts.filter(
+        (t) => !(t.record_id === current.id && t.concept_id === c.id)
+      )
+    );
+  }
+
+  async function saveConceptRename() {
+    const label = conceptDraft.trim();
+    if (!label || !editingConceptId) {
+      setEditingConceptId(null);
+      return;
+    }
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("concepts")
+      .update({ label })
+      .eq("id", editingConceptId);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setConcepts((cs) =>
+      cs.map((c) => (c.id === editingConceptId ? { ...c, label } : c))
+    );
+    setSuggestions((ss) =>
+      ss.map((s) =>
+        s.concept_id === editingConceptId ? { ...s, concept_label: label } : s
+      )
+    );
+    setEditingConceptId(null);
+  }
+
+  async function deleteConcept(c: Concept) {
+    const evidence = excerpts.filter((e) => e.concept_id === c.id).length;
+    const ok = window.confirm(
+      `Delete "${c.label}" from the WHOLE project? Every paper's checkmark for it and ${evidence} excerpt(s) are removed. This cannot be undone.`
+    );
+    if (!ok) return;
+    const supabase = createClient();
+    const { error: delErr } = await supabase
+      .from("concepts")
+      .delete()
+      .eq("id", c.id);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    setConcepts((cs) => cs.filter((x) => x.id !== c.id));
+    setTags((ts) => ts.filter((t) => t.concept_id !== c.id));
+    setExcerpts((xs) => xs.filter((x) => x.concept_id !== c.id));
+    setSuggestions((ss) => ss.filter((s) => s.concept_id !== c.id));
   }
 
   // ------------------------------------------------------------------
@@ -1519,37 +1635,86 @@ export default function ReadClient({
               )}
               {concepts.map((c, i) => {
                 const n = countByConcept.get(c.id) ?? 0;
-                const tagged = taggedConcepts.has(c.id);
+                const checked = taggedConcepts.has(c.id) || n > 0;
                 return (
-                  <button
+                  <div
                     key={c.id}
-                    onClick={() => jumpToConcept(c.id)}
-                    className={railBtn}
-                    title={
-                      n > 0
-                        ? "Jump to the first highlight"
-                        : tagged
-                          ? "Tagged without a highlight in this paper"
-                          : "Not evidenced in this paper yet"
-                    }
+                    className="group flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
+                    <button
+                      onClick={() => toggleTag(c)}
+                      title={
+                        checked
+                          ? "Uncheck: this paper does not evidence the concept"
+                          : "Check: this paper evidences the concept (even without a highlight)"
+                      }
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs transition-colors ${
+                        checked
+                          ? "border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-400 dark:text-teal-950"
+                          : "border-zinc-300 text-transparent hover:border-teal-600 dark:border-zinc-600"
+                      }`}
+                    >
+                      ✓
+                    </button>
                     <span
                       className="h-3 w-3 shrink-0 rounded-full"
                       style={{ backgroundColor: conceptColor(i).dot }}
                     />
-                    <span
-                      className={`min-w-0 flex-1 truncate ${
-                        n > 0 || tagged
-                          ? "text-zinc-900 dark:text-zinc-50"
-                          : "text-zinc-500 dark:text-zinc-500"
-                      }`}
-                    >
-                      {c.label}
-                    </span>
+                    {editingConceptId === c.id ? (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          saveConceptRename();
+                        }}
+                        className="min-w-0 flex-1"
+                      >
+                        <input
+                          autoFocus
+                          value={conceptDraft}
+                          onChange={(e) => setConceptDraft(e.target.value)}
+                          onBlur={saveConceptRename}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setEditingConceptId(null);
+                          }}
+                          className="h-6 w-full rounded border border-teal-600 bg-white px-1 text-sm text-zinc-900 outline-none dark:bg-zinc-950 dark:text-zinc-50"
+                        />
+                      </form>
+                    ) : (
+                      <button
+                        onClick={() => jumpToConcept(c.id)}
+                        title={n > 0 ? "Jump to the first highlight" : undefined}
+                        className={`min-w-0 flex-1 truncate text-left text-sm ${
+                          checked
+                            ? "text-zinc-900 dark:text-zinc-50"
+                            : "text-zinc-500 dark:text-zinc-500"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    )}
                     <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                      {n > 0 ? `✓ ${n}` : tagged ? "✓" : "·"}
+                      {n > 0 ? n : ""}
                     </span>
-                  </button>
+                    <span className="hidden shrink-0 gap-1 group-hover:flex">
+                      <button
+                        onClick={() => {
+                          setEditingConceptId(c.id);
+                          setConceptDraft(c.label);
+                        }}
+                        title="Rename this concept (everywhere)"
+                        className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => deleteConcept(c)}
+                        title="Delete this concept from the whole project"
+                        className="text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  </div>
                 );
               })}
               <form

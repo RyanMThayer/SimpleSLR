@@ -66,7 +66,14 @@ export function parseModelJson(raw: string): SuggestedConcept[] | null {
   for (const item of list.slice(0, MAX_CONCEPTS)) {
     if (typeof item !== "object" || item === null) continue;
     const o = item as Record<string, unknown>;
-    const label = typeof o.label === "string" ? o.label.trim().slice(0, 120) : "";
+    // "matched" (an exact existing label, or "new") wins over "label"
+    // when present, so models that answer the match question directly
+    // land on the vocabulary concept.
+    const matched = typeof o.matched === "string" ? o.matched.trim() : "";
+    let label = typeof o.label === "string" ? o.label.trim().slice(0, 120) : "";
+    if (matched && matched.toLowerCase() !== "new") {
+      label = matched.slice(0, 120);
+    }
     if (!label) continue;
     const definition =
       typeof o.definition === "string"

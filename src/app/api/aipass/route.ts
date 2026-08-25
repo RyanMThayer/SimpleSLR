@@ -69,18 +69,28 @@ async function extractAllPages(
   }
 }
 
-function systemPrompt(): string {
+function systemPrompt(rq: string | null, criteria: string | null): string {
   return [
-    "You assist a Webster and Watson style systematic literature review by finding where concepts are evidenced in ONE research paper.",
-    "Work from this single paper alone. Your job is twofold: find evidence for the team's existing concepts, and identify NEW concepts this paper evidences that the vocabulary does not cover yet - creating concepts is as much your job as matching existing ones.",
-    'Return STRICT JSON only, no prose: {"concepts":[{"label":"...","definition":"...","quotes":[{"page":1,"quote":"...","note":"..."}]}]}',
+    "You assist a Webster and Watson style literature review. The team builds a concept matrix: rows are papers, columns are CONCEPTS, and a checkmark means a paper evidences that concept.",
+    "Work from this ONE paper alone. Your job: find where it evidences existing vocabulary concepts, and propose new concepts only when nothing in the vocabulary fits even loosely.",
+    "",
+    `Research question of the review: ${rq?.trim() || "(not recorded)"}`,
+    `Inclusion criteria: ${criteria?.trim() || "(not recorded)"}`,
+    "",
+    "What makes a good concept (a matrix column):",
+    "- A broad, reusable theme, mechanism, method family, or outcome, named in 1 to 4 words. It must pass this test: a DIFFERENT paper in this review could plausibly also earn a checkmark for it. Aim the granularity at the level of the research question above.",
+    "- Keep specificity in the quotes, not in the concept name; several specific quotes gathered under one broad concept is acceptable and encouraged.",
+    "",
+    "Budget: at most 8 concepts for this paper. If you find more themes, group them under broader concepts until they fit the budget.",
+    "",
+    'Return STRICT JSON only, no prose: {"concepts":[{"matched":"...","label":"...","definition":"...","breadth_note":"...","quotes":[{"page":1,"quote":"...","note":"..."}]}]}',
     "Rules:",
-    "- quote MUST be copied verbatim, character for character, from the page it cites (the paper text is labeled [Page N]). Never paraphrase, never merge distant sentences, never invent text.",
-    "- A quote is one passage of roughly one to three sentences that clearly evidences the concept.",
-    "- When an existing vocabulary concept fits, use its label EXACTLY as given and omit the definition.",
-    "- Give every new concept a short label and a one sentence definition.",
-    "- Be generous but grounded: suggest every concept this paper genuinely evidences (the team consolidates and prunes later), yet never include a concept without a clear supporting passage.",
-    "- note is optional: at most one short sentence on why the quote evidences the concept.",
+    '- "matched": the EXACT label of the existing vocabulary concept this evidence belongs to, or "new" only when none fits. Prefer matching.',
+    '- "label": the concept name (the existing label verbatim when matched; your new 1 to 4 word name otherwise).',
+    '- "definition": one sentence, new concepts only.',
+    '- "breadth_note": one sentence on how a DIFFERENT paper could evidence this concept. If you cannot write one, the concept is too specific: broaden it or drop it.',
+    "- quotes: 1 to 5 passages per concept, each copied verbatim, character for character, from the page it cites (the paper text is labeled [Page N]). Never paraphrase, never merge distant sentences, never invent text. A quote is roughly one to three sentences.",
+    '- "note" on a quote is optional: one short sentence on why it evidences the concept.',
   ].join("\n");
 }
 
@@ -245,12 +255,21 @@ export async function POST(request: Request) {
     );
   }
 
-  // Concept vocabulary (labels + definitions only; no other papers).
-  const { data: conceptRows } = await supabase
-    .from("concepts")
-    .select("id, label, description")
-    .eq("project_id", projectId)
-    .order("position");
+  // Concept vocabulary (labels + definitions only; no other papers),
+  // plus the review's framing so granularity lands at the level of the
+  // research question.
+  const [{ data: conceptRows }, { data: proj }] = await Promise.all([
+    supabase
+      .from("concepts")
+      .select("id, label, description")
+      .eq("project_id", projectId)
+      .order("position"),
+    supabase
+      .from("projects")
+      .select("research_question, inclusion_criteria")
+      .eq("id", projectId)
+      .single(),
+  ]);
   const concepts = conceptRows ?? [];
 
   // Assemble the paper text, truncating very long documents.
@@ -282,7 +301,12 @@ export async function POST(request: Request) {
   const userPrompt = `Existing concept vocabulary:\n${vocab}\n\nPaper title: ${rec.title}\n\n${paperParts.join("\n\n")}`;
 
   // One call to the chosen provider with the caller's own key.
-  const call = await callModel(model, apiKey, systemPrompt(), userPrompt);
+  const call = await callModel(
+    model,
+    apiKey,
+    systemPrompt(proj?.research_question ?? null, proj?.inclusion_criteria ?? null),
+    userPrompt
+  );
   if (call.error || !call.text) {
     return NextResponse.json({
       error: call.error ?? "The model returned an empty response.",
@@ -320,7 +344,9 @@ export async function POST(request: Request) {
   let droppedUnverified = 0;
   let droppedDuplicate = 0;
 
-  for (const c of suggestions) {
+  // Budget enforced server side too: the prompt asks for at most 8,
+  // and anything past 10 is dropped rather than flooding the review.
+  for (const c of suggestions.slice(0, 10)) {
     const conceptId = byLabel.get(c.label.trim().toLowerCase()) ?? null;
     for (const q of c.quotes) {
       const pageText = pageMap.get(q.page);
