@@ -21,7 +21,14 @@ import { normQuote, parseModelJson, verifyQuote } from "@/lib/aipass";
 
 export const maxDuration = 60;
 
-const MODEL = "claude-sonnet-4-5";
+/** Allowed models; the key the user supplies must match the provider. */
+const MODELS: Record<string, "anthropic" | "openai"> = {
+  "claude-sonnet-5": "anthropic",
+  "claude-opus-5": "anthropic",
+  "gpt-5.6-terra": "openai",
+  "gpt-5.6-luna": "openai",
+};
+const DEFAULT_MODEL = "claude-sonnet-5";
 const MAX_PAGES = 60;
 const MAX_CHARS = 180_000;
 
@@ -58,16 +65,89 @@ async function extractAllPages(buf: ArrayBuffer): Promise<PageRow[] | null> {
 function systemPrompt(): string {
   return [
     "You assist a Webster and Watson style systematic literature review by finding where concepts are evidenced in ONE research paper.",
-    "You see only this single paper plus the team's concept vocabulary. Judge evidence strictly from this paper.",
+    "Work from this single paper alone. Your job is twofold: find evidence for the team's existing concepts, and identify NEW concepts this paper evidences that the vocabulary does not cover yet - creating concepts is as much your job as matching existing ones.",
     'Return STRICT JSON only, no prose: {"concepts":[{"label":"...","definition":"...","quotes":[{"page":1,"quote":"...","note":"..."}]}]}',
     "Rules:",
     "- quote MUST be copied verbatim, character for character, from the page it cites (the paper text is labeled [Page N]). Never paraphrase, never merge distant sentences, never invent text.",
     "- A quote is one passage of roughly one to three sentences that clearly evidences the concept.",
     "- When an existing vocabulary concept fits, use its label EXACTLY as given and omit the definition.",
-    "- Propose a new concept only when the paper clearly evidences something the vocabulary misses; give it a short label and a one sentence definition.",
-    "- Prefer precision over recall: at most a handful of well chosen quotes per concept, and skip concepts with no clear textual evidence.",
+    "- Give every new concept a short label and a one sentence definition.",
+    "- Be generous but grounded: suggest every concept this paper genuinely evidences (the team consolidates and prunes later), yet never include a concept without a clear supporting passage.",
     "- note is optional: at most one short sentence on why the quote evidences the concept.",
   ].join("\n");
+}
+
+/** One model call; returns the response text or an error message. */
+async function callModel(
+  model: string,
+  apiKey: string,
+  system: string,
+  userPrompt: string
+): Promise<{ text?: string; error?: string }> {
+  const provider = MODELS[model];
+  try {
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 8000,
+          system,
+          messages: [{ role: "user", content: userPrompt }],
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg =
+          (data as { error?: { message?: string } })?.error?.message ??
+          `Anthropic responded ${res.status}`;
+        return { error: res.status === 401 ? "Invalid Anthropic API key." : msg };
+      }
+      const text = (
+        (data as { content?: { type: string; text?: string }[] })?.content ?? []
+      )
+        .filter((b) => b.type === "text")
+        .map((b) => b.text ?? "")
+        .join("");
+      return { text };
+    }
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_completion_tokens: 8000,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg =
+        (data as { error?: { message?: string } })?.error?.message ??
+        `OpenAI responded ${res.status}`;
+      return { error: res.status === 401 ? "Invalid OpenAI API key." : msg };
+    }
+    const text =
+      (
+        data as {
+          choices?: { message?: { content?: string | null } }[];
+        }
+      )?.choices?.[0]?.message?.content ?? "";
+    return { text };
+  } catch {
+    return { error: `Could not reach the ${provider} API.` };
+  }
 }
 
 export async function POST(request: Request) {
@@ -83,6 +163,10 @@ export async function POST(request: Request) {
   const projectId: unknown = body?.projectId;
   const recordId: unknown = body?.recordId;
   const apiKey: unknown = body?.apiKey;
+  const model =
+    typeof body?.model === "string" && body.model in MODELS
+      ? (body.model as string)
+      : DEFAULT_MODEL;
   if (
     typeof projectId !== "string" ||
     typeof recordId !== "string" ||
@@ -185,41 +269,14 @@ export async function POST(request: Request) {
 
   const userPrompt = `Existing concept vocabulary:\n${vocab}\n\nPaper title: ${rec.title}\n\n${paperParts.join("\n\n")}`;
 
-  // One call to Anthropic with the caller's own key.
-  let modelText = "";
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4000,
-        system: systemPrompt(),
-        messages: [{ role: "user", content: userPrompt }],
-      }),
+  // One call to the chosen provider with the caller's own key.
+  const call = await callModel(model, apiKey, systemPrompt(), userPrompt);
+  if (call.error || !call.text) {
+    return NextResponse.json({
+      error: call.error ?? "The model returned an empty response.",
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      const msg =
-        (data as { error?: { message?: string } })?.error?.message ??
-        `Anthropic responded ${res.status}`;
-      return NextResponse.json({
-        error: res.status === 401 ? "Invalid API key." : msg,
-      });
-    }
-    modelText = (
-      (data as { content?: { type: string; text?: string }[] })?.content ?? []
-    )
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("");
-  } catch {
-    return NextResponse.json({ error: "Could not reach the Anthropic API." });
   }
+  const modelText = call.text;
 
   const suggestions = parseModelJson(modelText);
   if (!suggestions) {
@@ -285,7 +342,7 @@ export async function POST(request: Request) {
         prefix: anchor.prefix,
         suffix: anchor.suffix,
         note: q.note ?? null,
-        model: MODEL,
+        model,
         created_by: user.id,
       });
     }

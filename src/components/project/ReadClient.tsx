@@ -33,6 +33,25 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
  */
 
 // ----------------------------------------------------------------------
+// AI pass models: the user picks one; the matching provider key is
+// kept per device in localStorage and relayed per request.
+// ----------------------------------------------------------------------
+const AI_MODELS = [
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic" },
+  { id: "claude-opus-5", label: "Claude Opus 5", provider: "anthropic" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "openai" },
+] as const;
+type AiModelId = (typeof AI_MODELS)[number]["id"];
+const MODEL_STORE = "simpleslr-ai-model";
+function keyStoreFor(provider: "anthropic" | "openai"): string {
+  return `simpleslr-${provider}-key`;
+}
+function providerOf(model: AiModelId): "anthropic" | "openai" {
+  return AI_MODELS.find((m) => m.id === model)?.provider ?? "anthropic";
+}
+
+// ----------------------------------------------------------------------
 // Concept colors: a fixed palette assigned by concept order. Alpha low
 // enough that black text stays readable through the highlight.
 // ----------------------------------------------------------------------
@@ -446,6 +465,7 @@ export default function ReadClient({
   const [keyDraft, setKeyDraft] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
+  const [aiModel, setAiModel] = useState<AiModelId>("claude-sonnet-5");
   const [decidingSug, setDecidingSug] = useState<string | null>(null);
 
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -692,15 +712,27 @@ export default function ReadClient({
     return m;
   }, [paperSuggestions]);
 
-  const KEY_NAME = "simpleslr-anthropic-key";
+  // Restore the model choice, and check for the matching provider key
+  // whenever the choice changes.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(MODEL_STORE);
+      if (stored && AI_MODELS.some((m) => m.id === stored)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setAiModel(stored as AiModelId);
+      }
+    } catch {
+      // Storage unavailable: default model stands.
+    }
+  }, []);
   useEffect(() => {
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHasKey(Boolean(localStorage.getItem(KEY_NAME)));
+      setHasKey(Boolean(localStorage.getItem(keyStoreFor(providerOf(aiModel)))));
     } catch {
       // Storage unavailable: the key form stays visible.
     }
-  }, []);
+  }, [aiModel]);
 
   const onTextReady = useCallback((pageNo: number, text: string) => {
     pageTexts.current.set(pageNo, text);
@@ -922,7 +954,7 @@ export default function ReadClient({
     const k = keyDraft.trim();
     if (!k) return;
     try {
-      localStorage.setItem(KEY_NAME, k);
+      localStorage.setItem(keyStoreFor(providerOf(aiModel)), k);
       setHasKey(true);
       setEditingKey(false);
       setKeyDraft("");
@@ -931,11 +963,20 @@ export default function ReadClient({
     }
   }
 
+  function chooseModel(id: AiModelId) {
+    setAiModel(id);
+    try {
+      localStorage.setItem(MODEL_STORE, id);
+    } catch {
+      // Not persisted; still used for this session.
+    }
+  }
+
   async function runAiPass() {
     if (!current?.fulltext_path || aiBusy) return;
     let key = "";
     try {
-      key = localStorage.getItem(KEY_NAME) ?? "";
+      key = localStorage.getItem(keyStoreFor(providerOf(aiModel))) ?? "";
     } catch {
       /* handled below */
     }
@@ -953,6 +994,7 @@ export default function ReadClient({
           projectId: project.id,
           recordId: current.id,
           apiKey: key,
+          model: aiModel,
         }),
       });
       const data = await res.json();
@@ -1314,19 +1356,39 @@ export default function ReadClient({
                   </span>
                 )}
               </div>
+              <select
+                value={aiModel}
+                onChange={(e) => chooseModel(e.target.value as AiModelId)}
+                className="mb-1.5 h-8 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                title="Which model reads the paper; the matching provider's API key is used"
+              >
+                {AI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
               {editingKey || !hasKey ? (
                 <div className="flex flex-col gap-1.5">
                   <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    Paste your Anthropic API key. It stays in this browser
-                    only and is sent straight to the Anthropic API for each
-                    run, never stored on the server.
+                    Paste your{" "}
+                    {providerOf(aiModel) === "anthropic"
+                      ? "Anthropic"
+                      : "OpenAI"}{" "}
+                    API key. It stays in this browser only and is sent
+                    straight to the provider for each run, never stored on
+                    the server.
                   </p>
                   <div className="flex gap-1.5">
                     <input
                       type="password"
                       value={keyDraft}
                       onChange={(e) => setKeyDraft(e.target.value)}
-                      placeholder="sk-ant-..."
+                      placeholder={
+                        providerOf(aiModel) === "anthropic"
+                          ? "sk-ant-..."
+                          : "sk-..."
+                      }
                       className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                     />
                     <button
