@@ -470,6 +470,13 @@ export default function ReadClient({
   const [decidingSug, setDecidingSug] = useState<string | null>(null);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [conceptDraft, setConceptDraft] = useState("");
+  // Last deleted concept with its data, restorable while the toast shows.
+  const [undoDel, setUndoDel] = useState<{
+    concept: Concept;
+    tags: ConceptTag[];
+    excerpts: ConceptExcerpt[];
+  } | null>(null);
+  const undoTimer = useRef<number | null>(null);
 
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -1044,11 +1051,14 @@ export default function ReadClient({
   }
 
   async function deleteConcept(c: Concept) {
-    const evidence = excerpts.filter((e) => e.concept_id === c.id).length;
-    const ok = window.confirm(
-      `Delete "${c.label}" from the WHOLE project? Every paper's checkmark for it and ${evidence} excerpt(s) are removed. This cannot be undone.`
-    );
-    if (!ok) return;
+    // No confirmation dialog: cleanup sessions delete many concepts in
+    // a row. Instead the concept and its data are snapshotted and the
+    // toast offers Undo for a few seconds.
+    const snapshot = {
+      concept: c,
+      tags: tags.filter((t) => t.concept_id === c.id),
+      excerpts: excerpts.filter((e) => e.concept_id === c.id),
+    };
     const supabase = createClient();
     const { error: delErr } = await supabase
       .from("concepts")
@@ -1062,6 +1072,74 @@ export default function ReadClient({
     setTags((ts) => ts.filter((t) => t.concept_id !== c.id));
     setExcerpts((xs) => xs.filter((x) => x.concept_id !== c.id));
     setSuggestions((ss) => ss.filter((s) => s.concept_id !== c.id));
+    setUndoDel(snapshot);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    undoTimer.current = window.setTimeout(() => setUndoDel(null), 8000);
+  }
+
+  async function undoDeleteConcept() {
+    if (!undoDel) return;
+    const { concept, tags: oldTags, excerpts: oldExcerpts } = undoDel;
+    setUndoDel(null);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    const supabase = createClient();
+    const { data: reborn, error: cErr } = await supabase
+      .from("concepts")
+      .insert({
+        project_id: project.id,
+        label: concept.label,
+        description: concept.description,
+        position: concept.position,
+        created_by: concept.created_by,
+      })
+      .select("*")
+      .single();
+    if (cErr || !reborn) {
+      setError(cErr?.message ?? "Could not restore the concept.");
+      return;
+    }
+    const newId = (reborn as Concept).id;
+    let newTags: ConceptTag[] = [];
+    if (oldTags.length > 0) {
+      const { data } = await supabase
+        .from("concept_tags")
+        .insert(
+          oldTags.map((t) => ({
+            project_id: project.id,
+            concept_id: newId,
+            record_id: t.record_id,
+            unit: t.unit,
+            note: t.note,
+            tagged_by: t.tagged_by,
+          }))
+        )
+        .select("*");
+      newTags = (data ?? []) as ConceptTag[];
+    }
+    let newExcerpts: ConceptExcerpt[] = [];
+    if (oldExcerpts.length > 0) {
+      const { data } = await supabase
+        .from("concept_excerpts")
+        .insert(
+          oldExcerpts.map((e) => ({
+            project_id: project.id,
+            concept_id: newId,
+            record_id: e.record_id,
+            quote: e.quote,
+            page: e.page,
+            pos_start: e.pos_start,
+            pos_end: e.pos_end,
+            prefix: e.prefix,
+            suffix: e.suffix,
+            added_by: e.added_by,
+          }))
+        )
+        .select("*");
+      newExcerpts = (data ?? []) as ConceptExcerpt[];
+    }
+    setConcepts((cs) => [...cs, reborn as Concept]);
+    setTags((ts) => [...ts, ...newTags]);
+    setExcerpts((xs) => [...xs, ...newExcerpts]);
   }
 
   // ------------------------------------------------------------------
@@ -1695,21 +1773,21 @@ export default function ReadClient({
                     <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
                       {n > 0 ? n : ""}
                     </span>
-                    <span className="hidden shrink-0 gap-1 group-hover:flex">
+                    <span className="hidden shrink-0 gap-0.5 group-hover:flex">
                       <button
                         onClick={() => {
                           setEditingConceptId(c.id);
                           setConceptDraft(c.label);
                         }}
                         title="Rename this concept (everywhere)"
-                        className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-sm text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
                       >
                         ✎
                       </button>
                       <button
                         onClick={() => deleteConcept(c)}
-                        title="Delete this concept from the whole project"
-                        className="text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400"
+                        title="Delete this concept from the whole project (undoable for a few seconds)"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-base leading-none text-zinc-600 hover:bg-red-100 hover:text-red-700 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-300"
                       >
                         ×
                       </button>
@@ -1877,6 +1955,17 @@ export default function ReadClient({
       {notice && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-zinc-900 px-4 py-2 text-sm text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
           {notice}
+        </div>
+      )}
+      {undoDel && (
+        <div className="fixed bottom-16 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-900 px-4 py-2 text-sm text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
+          <span>Deleted &ldquo;{undoDel.concept.label}&rdquo;</span>
+          <button
+            onClick={undoDeleteConcept}
+            className="font-semibold underline underline-offset-2"
+          >
+            Undo
+          </button>
         </div>
       )}
     </main>
