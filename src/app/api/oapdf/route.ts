@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { installPdfNodeShims } from "@/lib/pdfNodeShims";
 
 /**
  * Fetch an open access PDF (url from OpenAlex OA locations) on the
@@ -35,6 +36,7 @@ function urlAllowed(raw: string): boolean {
 
 async function extractFirstPagesText(buf: ArrayBuffer): Promise<string | null> {
   try {
+    installPdfNodeShims();
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const task = pdfjs.getDocument({
       data: new Uint8Array(buf),

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildAnchor } from "@/lib/anchors";
 import { normQuote, parseModelJson, verifyQuote } from "@/lib/aipass";
+import { installPdfNodeShims } from "@/lib/pdfNodeShims";
 
 /**
  * The AI concept pass: one paper, one call. Downloads the stored PDF,
@@ -38,6 +39,7 @@ async function extractAllPages(
   buf: ArrayBuffer
 ): Promise<{ pages: PageRow[] } | { failure: string }> {
   try {
+    installPdfNodeShims();
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const task = pdfjs.getDocument({
       data: new Uint8Array(buf),
