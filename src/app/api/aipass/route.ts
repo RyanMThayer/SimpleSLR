@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildAnchor } from "@/lib/anchors";
-import { normQuote, parseModelJson, verifyQuote } from "@/lib/aipass";
+import {
+  normQuote,
+  normalizeNewConceptLabel,
+  parseModelJson,
+  verifyQuote,
+} from "@/lib/aipass";
 import { installPdfNodeShims } from "@/lib/pdfNodeShims";
 
 /**
@@ -348,11 +353,28 @@ export async function POST(request: Request) {
   const rows: Record<string, unknown>[] = [];
   let droppedUnverified = 0;
   let droppedDuplicate = 0;
+  let droppedBadLabel = 0;
 
   // Budget enforced server side too: the prompt asks for at most 8,
   // and anything past 10 is dropped rather than flooding the review.
   for (const c of suggestions.slice(0, 10)) {
     const conceptId = byLabel.get(c.label.trim().toLowerCase()) ?? null;
+    // Unmatched labels must be name shaped; salvage "Label: sentence"
+    // into label + definition, or drop the concept entirely.
+    let label = c.label;
+    let definition = c.definition;
+    if (!conceptId) {
+      const fixed = normalizeNewConceptLabel(c.label, c.definition);
+      if (!fixed) {
+        droppedBadLabel++;
+        continue;
+      }
+      label = fixed.label;
+      definition = fixed.definition;
+    }
+    // A salvaged label may now match the vocabulary after all.
+    const finalConceptId =
+      conceptId ?? byLabel.get(label.trim().toLowerCase()) ?? null;
     for (const q of c.quotes) {
       const pageText = pageMap.get(q.page);
       const hit = pageText ? verifyQuote(pageText, q.quote) : null;
@@ -375,9 +397,9 @@ export async function POST(request: Request) {
         project_id: projectId,
         record_id: recordId,
         run_id: runId,
-        concept_id: conceptId,
-        concept_label: c.label,
-        definition: conceptId ? null : (c.definition ?? null),
+        concept_id: finalConceptId,
+        concept_label: label,
+        definition: finalConceptId ? null : (definition ?? null),
         quote: anchor.quote,
         page: q.page,
         pos_start: anchor.pos_start,
@@ -404,6 +426,7 @@ export async function POST(request: Request) {
     suggested: rows.length,
     droppedUnverified,
     droppedDuplicate,
+    droppedBadLabel,
     pages: pages.length,
     truncated,
   });

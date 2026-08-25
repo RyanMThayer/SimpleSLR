@@ -102,6 +102,31 @@ export function parseModelJson(raw: string): SuggestedConcept[] | null {
   return out;
 }
 
+/**
+ * New concept labels must be short names, but models sometimes stuff
+ * "Label: a whole defining sentence" into the label field. Salvage by
+ * splitting at the first ": " or spaced dash (the tail becomes the
+ * definition when none was given), then enforce name shape: at most 6
+ * words and 60 characters. Returns null when nothing name-shaped can
+ * be recovered; the caller drops the concept rather than storing a
+ * mangled label. Hyphens inside words (e-government) never split.
+ */
+export function normalizeNewConceptLabel(
+  rawLabel: string,
+  definition?: string
+): { label: string; definition?: string } | null {
+  let label = rawLabel.trim();
+  let def = definition;
+  const m = /^(.{2,80}?)(?::\s*| [-–—] )(.{8,})$/.exec(label);
+  if (m) {
+    label = m[1].trim();
+    if (!def) def = m[2].trim().slice(0, 500);
+  }
+  const words = label.split(/\s+/).filter(Boolean);
+  if (!label || label.length > 60 || words.length > 6) return null;
+  return { label, definition: def };
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

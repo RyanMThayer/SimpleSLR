@@ -1350,6 +1350,9 @@ export default function ReadClient({
         if (data.droppedDuplicate > 0) {
           bits.push(`${data.droppedDuplicate} already covered`);
         }
+        if (data.droppedBadLabel > 0) {
+          bits.push(`${data.droppedBadLabel} dropped for unusable labels`);
+        }
         if (data.truncated) bits.push("long paper truncated");
         setAiErr(false);
         setAiMsg(bits.join(" · ") + ".");
