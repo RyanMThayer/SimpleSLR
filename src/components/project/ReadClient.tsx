@@ -64,19 +64,79 @@ function pointToOffset(
   return r.toString().length;
 }
 
-/** Inverse of pointToOffset: the text node + local offset at `offset`. */
-function offsetToPoint(
+type PlainRect = { top: number; left: number; width: number; height: number };
+
+/**
+ * Merge rect fragments that sit on the same text line into one rect
+ * per line, so a highlight never paints the same spot twice (stacked
+ * translucent rects read darker) and span seams disappear.
+ */
+function mergeLineRects(rects: PlainRect[]): PlainRect[] {
+  const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left);
+  const merged: PlainRect[] = [];
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    const sameLine =
+      last && Math.abs(last.top - r.top) < Math.min(last.height, r.height) * 0.6;
+    const touches = last && r.left <= last.left + last.width + 3;
+    if (last && sameLine && touches) {
+      const right = Math.max(last.left + last.width, r.left + r.width);
+      const bottom = Math.max(last.top + last.height, r.top + r.height);
+      last.left = Math.min(last.left, r.left);
+      last.top = Math.min(last.top, r.top);
+      last.width = right - last.left;
+      last.height = bottom - last.top;
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Rects covering [start, end) of the text layer's text, computed per
+ * TEXT NODE. Range.getClientRects() on a multi node range also returns
+ * the border boxes of fully contained span elements, which stacks a
+ * second translucent rect over interior lines; going node by node
+ * avoids that entirely.
+ */
+function rectsForOffsets(
   root: HTMLElement,
-  offset: number
-): { node: Node; offset: number } | null {
+  start: number,
+  end: number,
+  origin: DOMRect
+): PlainRect[] {
+  const out: PlainRect[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let total = 0;
   for (let cur = walker.nextNode(); cur; cur = walker.nextNode()) {
     const len = (cur as Text).data.length;
-    if (offset <= total + len) return { node: cur, offset: offset - total };
-    total += len;
+    const nodeStart = total;
+    const nodeEnd = total + len;
+    total = nodeEnd;
+    if (nodeEnd <= start) continue;
+    if (nodeStart >= end) break;
+    const s = Math.max(start, nodeStart) - nodeStart;
+    const e = Math.min(end, nodeEnd) - nodeStart;
+    if (s >= e) continue;
+    const r = document.createRange();
+    try {
+      r.setStart(cur, s);
+      r.setEnd(cur, e);
+    } catch {
+      continue;
+    }
+    for (const cr of r.getClientRects()) {
+      if (cr.width < 1 || cr.height < 1) continue;
+      out.push({
+        top: cr.top - origin.top,
+        left: cr.left - origin.left,
+        width: cr.width,
+        height: cr.height,
+      });
+    }
   }
-  return null;
+  return mergeLineRects(out);
 }
 
 type HighlightRect = {
@@ -211,25 +271,11 @@ function PageView({
         suffix: ex.suffix ?? "",
       });
       if (!hit) continue;
-      const from = offsetToPoint(textDiv, hit.start);
-      const to = offsetToPoint(textDiv, hit.end);
-      if (!from || !to) continue;
-      const range = document.createRange();
-      try {
-        range.setStart(from.node, from.offset);
-        range.setEnd(to.node, to.offset);
-      } catch {
-        continue;
-      }
       const idx = conceptIndex.get(ex.concept_id) ?? 0;
       const label = conceptLabel.get(ex.concept_id) ?? "concept";
-      for (const cr of range.getClientRects()) {
-        if (cr.width < 1 || cr.height < 1) continue;
+      for (const r of rectsForOffsets(textDiv, hit.start, hit.end, wrapBox)) {
         out.push({
-          top: cr.top - wrapBox.top,
-          left: cr.left - wrapBox.left,
-          width: cr.width,
-          height: cr.height,
+          ...r,
           excerptId: ex.id,
           fill: conceptColor(idx).fill,
           title: `${label} · ${authorName(ex.added_by)}`,
@@ -248,27 +294,14 @@ function PageView({
     const textDiv = textRef.current;
     const wrap = wrapRef.current;
     if (textDiv && wrap && pageText !== null && pending) {
-      const from = offsetToPoint(textDiv, pending.start);
-      const to = offsetToPoint(textDiv, pending.end);
-      if (from && to) {
-        const range = document.createRange();
-        try {
-          range.setStart(from.node, from.offset);
-          range.setEnd(to.node, to.offset);
-          const wrapBox = wrap.getBoundingClientRect();
-          for (const cr of range.getClientRects()) {
-            if (cr.width < 1 || cr.height < 1) continue;
-            out.push({
-              top: cr.top - wrapBox.top,
-              left: cr.left - wrapBox.left,
-              width: cr.width,
-              height: cr.height,
-            });
-          }
-        } catch {
-          // Unmappable offsets: no pending overlay for this page.
-        }
-      }
+      out.push(
+        ...rectsForOffsets(
+          textDiv,
+          pending.start,
+          pending.end,
+          wrap.getBoundingClientRect()
+        )
+      );
     }
     // Derived from DOM geometry after render, like the highlight rects.
     // eslint-disable-next-line react-hooks/set-state-in-effect
