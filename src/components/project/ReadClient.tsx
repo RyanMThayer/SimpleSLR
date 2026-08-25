@@ -89,11 +89,17 @@ type HighlightRect = {
   title: string;
 };
 
-type Sel = {
+/** One page's share of a selection; a selection spanning a page break
+ * carries one part per page and saves one anchored excerpt per part. */
+type SelPart = {
   page: number;
   start: number;
   end: number;
   quote: string;
+};
+
+type Sel = {
+  parts: SelPart[];
   x: number;
   y: number;
 };
@@ -110,8 +116,8 @@ function PageView({
   conceptLabel,
   authorName,
   flashId,
+  pending,
   onTextReady,
-  onSelect,
   onPickExcerpt,
   registerEl,
 }: {
@@ -123,8 +129,8 @@ function PageView({
   conceptLabel: Map<string, string>;
   authorName: (id: string | null) => string;
   flashId: string | null;
+  pending: { start: number; end: number } | null;
   onTextReady: (pageNo: number, text: string) => void;
-  onSelect: (sel: Sel) => void;
   onPickExcerpt: (id: string) => void;
   registerEl: (pageNo: number, el: HTMLDivElement | null) => void;
 }) {
@@ -134,6 +140,9 @@ function PageView({
   const [pageText, setPageText] = useState<string | null>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [rects, setRects] = useState<HighlightRect[]>([]);
+  const [pendingRects, setPendingRects] = useState<
+    { top: number; left: number; width: number; height: number }[]
+  >([]);
 
   // Render the page once (canvas + text layer), then report its text.
   useEffect(() => {
@@ -230,23 +239,41 @@ function PageView({
     setRects(out);
   }, [pageText, excerpts, conceptIndex, conceptLabel, authorName]);
 
-  function handleMouseUp(e: React.MouseEvent) {
+  // The pending overlay: marks the active selection so it stays
+  // visible after the concept picker takes keyboard focus (focusing an
+  // input clears the browser's own selection painting).
+  useEffect(() => {
+    const out: { top: number; left: number; width: number; height: number }[] =
+      [];
     const textDiv = textRef.current;
-    if (!textDiv || pageText === null) return;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    const rawStart = pointToOffset(textDiv, range.startContainer, range.startOffset);
-    const rawEnd = pointToOffset(textDiv, range.endContainer, range.endOffset);
-    if (rawStart === null || rawEnd === null || rawStart >= rawEnd) return;
-    // Forgiving boundaries: a drag that clips half a word still tags
-    // the whole word.
-    const { start, end } = snapToWords(pageText, rawStart, rawEnd);
-    if (start >= end) return;
-    const quote = pageText.slice(start, end);
-    if (!quote.trim() || quote.length > 4000) return;
-    onSelect({ page: pageNo, start, end, quote, x: e.clientX, y: e.clientY });
-  }
+    const wrap = wrapRef.current;
+    if (textDiv && wrap && pageText !== null && pending) {
+      const from = offsetToPoint(textDiv, pending.start);
+      const to = offsetToPoint(textDiv, pending.end);
+      if (from && to) {
+        const range = document.createRange();
+        try {
+          range.setStart(from.node, from.offset);
+          range.setEnd(to.node, to.offset);
+          const wrapBox = wrap.getBoundingClientRect();
+          for (const cr of range.getClientRects()) {
+            if (cr.width < 1 || cr.height < 1) continue;
+            out.push({
+              top: cr.top - wrapBox.top,
+              left: cr.left - wrapBox.left,
+              width: cr.width,
+              height: cr.height,
+            });
+          }
+        } catch {
+          // Unmappable offsets: no pending overlay for this page.
+        }
+      }
+    }
+    // Derived from DOM geometry after render, like the highlight rects.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPendingRects(out);
+  }, [pending, pageText]);
 
   return (
     <div
@@ -254,7 +281,6 @@ function PageView({
         wrapRef.current = el;
         registerEl(pageNo, el);
       }}
-      onMouseUp={handleMouseUp}
       className="relative mx-auto mb-4 bg-white shadow-sm dark:shadow-none"
       style={
         {
@@ -265,9 +291,21 @@ function PageView({
         } as React.CSSProperties
       }
     >
-      <canvas ref={canvasRef} className="absolute left-0 top-0" />
+      <canvas ref={canvasRef} className="absolute left-0 top-0 select-none" />
       {/* Highlights sit between the canvas and the text layer. */}
-      <div className="pointer-events-none absolute left-0 top-0 h-full w-full">
+      <div className="pointer-events-none absolute left-0 top-0 h-full w-full select-none">
+        {pendingRects.map((r, i) => (
+          <div
+            key={`p${i}`}
+            className="absolute rounded-[2px] bg-teal-500/25 ring-1 ring-teal-600/60"
+            style={{
+              top: r.top,
+              left: r.left,
+              width: r.width,
+              height: r.height,
+            }}
+          />
+        ))}
         {rects.map((r, i) => (
           <div
             key={i}
@@ -535,33 +573,85 @@ export default function ReadClient({
   }, []);
 
   // ------------------------------------------------------------------
+  // Selection: handled at the viewport level so a drag across a page
+  // break still works — each page contributes its own part, clamped to
+  // its share of the selection and snapped to word boundaries.
+  // ------------------------------------------------------------------
+  function handleViewportMouseUp(e: React.MouseEvent) {
+    if (!doc) return;
+    const s = window.getSelection();
+    if (!s || s.isCollapsed || s.rangeCount === 0) return;
+    const range = s.getRangeAt(0);
+    const parts: SelPart[] = [];
+    for (const [pageNo, wrap] of pageEls.current) {
+      if (!wrap) continue;
+      const textDiv = wrap.querySelector(".textLayer") as HTMLElement | null;
+      const pageText = pageTexts.current.get(pageNo);
+      if (!textDiv || pageText == null || pageText.length === 0) continue;
+      if (!range.intersectsNode(textDiv)) continue;
+      const startIn =
+        textDiv === range.startContainer || textDiv.contains(range.startContainer);
+      const endIn =
+        textDiv === range.endContainer || textDiv.contains(range.endContainer);
+      const rawStart = startIn
+        ? pointToOffset(textDiv, range.startContainer, range.startOffset)
+        : 0;
+      const rawEnd = endIn
+        ? pointToOffset(textDiv, range.endContainer, range.endOffset)
+        : pageText.length;
+      if (rawStart === null || rawEnd === null || rawStart >= rawEnd) continue;
+      const { start, end } = snapToWords(pageText, rawStart, rawEnd);
+      if (start >= end) continue;
+      const quote = pageText.slice(start, end);
+      if (!quote.trim()) continue;
+      parts.push({ page: pageNo, start, end, quote });
+    }
+    parts.sort((a, b) => a.page - b.page);
+    if (parts.length === 0) return;
+    const totalLen = parts.reduce((n, p) => n + p.quote.length, 0);
+    if (parts.length > 3 || totalLen > 4000) {
+      setNotice("That selection is very long — pick a tighter passage.");
+      window.setTimeout(() => setNotice(null), 2500);
+      return;
+    }
+    setSel({ parts, x: e.clientX, y: e.clientY });
+  }
+
+  // ------------------------------------------------------------------
   // Saving excerpts
   // ------------------------------------------------------------------
   async function saveSelection(concept: Concept) {
     if (!sel || !current || saving) return;
-    const pageText = pageTexts.current.get(sel.page);
-    if (!pageText) return;
-    const anchor = buildAnchor(pageText, sel.start, sel.end);
-    if (!anchor) return;
+    // One anchored excerpt per page the selection touches.
+    const rows = sel.parts.flatMap((part) => {
+      const pageText = pageTexts.current.get(part.page);
+      const anchor = pageText
+        ? buildAnchor(pageText, part.start, part.end)
+        : null;
+      if (!anchor) return [];
+      return [
+        {
+          project_id: project.id,
+          concept_id: concept.id,
+          record_id: current.id,
+          quote: anchor.quote,
+          page: part.page,
+          pos_start: anchor.pos_start,
+          pos_end: anchor.pos_end,
+          prefix: anchor.prefix,
+          suffix: anchor.suffix,
+          added_by: userId,
+        },
+      ];
+    });
+    if (rows.length === 0) return;
     setSaving(true);
     const supabase = createClient();
     const { data: inserted, error: insErr } = await supabase
       .from("concept_excerpts")
-      .insert({
-        project_id: project.id,
-        concept_id: concept.id,
-        record_id: current.id,
-        quote: anchor.quote,
-        page: sel.page,
-        pos_start: anchor.pos_start,
-        pos_end: anchor.pos_end,
-        prefix: anchor.prefix,
-        suffix: anchor.suffix,
-        added_by: userId,
-      })
-      .select("*")
-      .single();
-    if (insErr || !inserted) {
+      .insert(rows)
+      .select("*");
+    if (insErr || !inserted || inserted.length === 0) {
       setSaving(false);
       setError(
         insErr?.message.includes("pos_start")
@@ -585,7 +675,7 @@ export default function ReadClient({
       setError(tagErr.message);
       return;
     }
-    setExcerpts((xs) => [...xs, inserted as ConceptExcerpt]);
+    setExcerpts((xs) => [...xs, ...(inserted as ConceptExcerpt[])]);
     setTags((ts) =>
       ts.some(
         (t) => t.concept_id === concept.id && t.record_id === current.id
@@ -594,7 +684,7 @@ export default function ReadClient({
         : [
             ...ts,
             {
-              id: `local-${inserted.id}`,
+              id: `local-${inserted[0].id}`,
               project_id: project.id,
               concept_id: concept.id,
               record_id: current.id,
@@ -735,6 +825,7 @@ export default function ReadClient({
           {/* ---------------- Paper viewport ---------------- */}
           <div
             ref={viewportRef}
+            onMouseUp={handleViewportMouseUp}
             className="relative min-w-0 flex-1 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-100 p-3 dark:border-zinc-800 dark:bg-zinc-950"
             style={{ maxHeight: "calc(100vh - 170px)" }}
           >
@@ -816,8 +907,8 @@ export default function ReadClient({
                   conceptLabel={conceptLabel}
                   authorName={authorName}
                   flashId={flashId}
+                  pending={sel?.parts.find((p) => p.page === n) ?? null}
                   onTextReady={onTextReady}
-                  onSelect={setSel}
                   onPickExcerpt={(id) => {
                     const ex = excerpts.find((x) => x.id === id);
                     if (ex) jumpToExcerpt(ex);
@@ -1011,7 +1102,12 @@ export default function ReadClient({
             }}
           >
             <p className="mb-1 line-clamp-2 px-1 text-xs italic text-zinc-500 dark:text-zinc-400">
-              &ldquo;{cleanQuote(sel.quote).slice(0, 140)}&rdquo;
+              &ldquo;
+              {cleanQuote(sel.parts.map((p) => p.quote).join(" ")).slice(0, 140)}
+              &rdquo;
+              {sel.parts.length > 1 && (
+                <span className="not-italic"> · spans {sel.parts.length} pages</span>
+              )}
             </p>
             <input
               autoFocus
