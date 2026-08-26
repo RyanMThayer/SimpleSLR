@@ -546,6 +546,13 @@ export default function ReadClient({
   const [keyDraft, setKeyDraft] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [editingKey, setEditingKey] = useState(false);
+  // The "about your API key" panel, plus which providers currently have
+  // a key in this browser (read fresh each time the panel opens).
+  const [keyInfoOpen, setKeyInfoOpen] = useState(false);
+  const [storedKeys, setStoredKeys] = useState({
+    anthropic: false,
+    openai: false,
+  });
   const [aiModel, setAiModel] = useState<AiModelId>("claude-sonnet-5");
   const [decidingSug, setDecidingSug] = useState<string | null>(null);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
@@ -1309,6 +1316,32 @@ export default function ReadClient({
     }
   }
 
+  function openKeyInfo() {
+    try {
+      setStoredKeys({
+        anthropic: !!localStorage.getItem(keyStoreFor("anthropic")),
+        openai: !!localStorage.getItem(keyStoreFor("openai")),
+      });
+    } catch {
+      setStoredKeys({ anthropic: false, openai: false });
+    }
+    setKeyInfoOpen(true);
+  }
+
+  function removeKey(provider: "anthropic" | "openai") {
+    try {
+      localStorage.removeItem(keyStoreFor(provider));
+    } catch {
+      // Nothing stored anyway.
+    }
+    setStoredKeys((s) => ({ ...s, [provider]: false }));
+    if (provider === providerOf(aiModel)) {
+      setHasKey(false);
+      setEditingKey(false);
+      setKeyDraft("");
+    }
+  }
+
   async function runAiPass() {
     if (!current?.fulltext_path || aiBusy) return;
     let key = "";
@@ -1693,11 +1726,21 @@ export default function ReadClient({
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   AI pass
                 </p>
-                {paperSuggestions.length > 0 && (
-                  <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
-                    {paperSuggestions.length} to review
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {paperSuggestions.length > 0 && (
+                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                      {paperSuggestions.length} to review
+                    </span>
+                  )}
+                  <button
+                    onClick={openKeyInfo}
+                    title="How your API key is used, how to get one, and how to keep it safe"
+                    aria-label="About your API key"
+                    className="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-teal-600 hover:text-teal-700 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-teal-400 dark:hover:text-teal-300"
+                  >
+                    ?
+                  </button>
+                </div>
               </div>
               <select
                 value={aiModel}
@@ -1720,7 +1763,14 @@ export default function ReadClient({
                       : "OpenAI"}{" "}
                     API key. It stays in this browser only and is sent
                     straight to the provider for each run, never stored on
-                    the server.
+                    the server.{" "}
+                    <button
+                      type="button"
+                      onClick={openKeyInfo}
+                      className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+                    >
+                      How this works, and how to get a key
+                    </button>
                   </p>
                   <div className="flex gap-1.5">
                     <input
@@ -1841,6 +1891,147 @@ export default function ReadClient({
                 </div>
               )}
             </div>
+
+            {/* ---------------- About your API key ---------------- */}
+            {keyInfoOpen && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/50 p-4"
+                onClick={() => setKeyInfoOpen(false)}
+              >
+                <div
+                  role="dialog"
+                  aria-label="About your API key"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                      Your API key
+                    </h2>
+                    <button
+                      onClick={() => setKeyInfoOpen(false)}
+                      aria-label="Close"
+                      className="rounded-full px-2 py-0.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-4 text-sm text-zinc-700 dark:text-zinc-300">
+                    <section>
+                      <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+                        How SimpleSLR uses it
+                      </h3>
+                      <p className="text-zinc-600 dark:text-zinc-400">
+                        Your key is saved only in this browser, never in your
+                        SimpleSLR account or our database. When you run an AI
+                        pass, the key travels with that one request; our
+                        server relays it to Anthropic or OpenAI and forgets
+                        it, without storing or logging it. Teammates never
+                        see your key, and each person uses their own. The
+                        provider bills your account directly, and the AI only
+                        ever reads one paper at a time; every suggestion
+                        waits for a human accept or reject.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+                        Getting a key
+                      </h3>
+                      <p className="mb-1.5 text-zinc-600 dark:text-zinc-400">
+                        For Claude models, create a key in the{" "}
+                        <a
+                          href="https://console.anthropic.com/settings/keys"
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+                        >
+                          Anthropic Console
+                        </a>{" "}
+                        under API keys (you need an account with billing set
+                        up or credits added). Keys start with sk-ant-.
+                      </p>
+                      <p className="text-zinc-600 dark:text-zinc-400">
+                        For GPT models, create one in the{" "}
+                        <a
+                          href="https://platform.openai.com/api-keys"
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+                        >
+                          OpenAI platform
+                        </a>{" "}
+                        under API keys, also with billing set up. Keys start
+                        with sk-. Either way, the key is shown once at
+                        creation; paste it here right away.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+                        Keeping it safe
+                      </h3>
+                      <p className="text-zinc-600 dark:text-zinc-400">
+                        Create a dedicated key just for SimpleSLR and name it
+                        so you recognize it later. In the same dashboard, set
+                        a monthly spend limit; both providers support this,
+                        and it caps the damage if a key ever leaks anywhere.
+                        You can revoke the key there at any time without
+                        affecting anything else, then paste a new one here.
+                        And since the key lives in this browser profile, only
+                        use it on devices you trust.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+                        What it costs
+                      </h3>
+                      <p className="text-zinc-600 dark:text-zinc-400">
+                        One pass reads a single paper. Depending on paper
+                        length, that is usually around a cent with GPT-5.6
+                        Luna, roughly 5 to 15 cents with Claude Sonnet 5 or
+                        GPT-5.6 Terra, and a few tens of cents with Claude
+                        Opus 5. Exact usage shows up in your provider
+                        dashboard.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+                        Stored in this browser
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => removeKey("anthropic")}
+                          disabled={!storedKeys.anthropic}
+                          className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
+                        >
+                          {storedKeys.anthropic
+                            ? "Remove Anthropic key"
+                            : "No Anthropic key stored"}
+                        </button>
+                        <button
+                          onClick={() => removeKey("openai")}
+                          disabled={!storedKeys.openai}
+                          className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
+                        >
+                          {storedKeys.openai
+                            ? "Remove OpenAI key"
+                            : "No OpenAI key stored"}
+                        </button>
+                      </div>
+                      <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        Removing a key here only forgets it in this browser;
+                        revoke it in the provider dashboard to disable it
+                        everywhere.
+                      </p>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
