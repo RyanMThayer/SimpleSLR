@@ -37,10 +37,36 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 // kept per device in localStorage and relayed per request.
 // ----------------------------------------------------------------------
 const AI_MODELS = [
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic" },
-  { id: "claude-opus-5", label: "Claude Opus 5", provider: "anthropic" },
-  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" },
-  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: "openai" },
+  // inPerMTok/outPerMTok: provider list prices in USD per million
+  // input/output tokens, used for the per-paper cost preview.
+  {
+    id: "claude-sonnet-5",
+    label: "Claude Sonnet 5",
+    provider: "anthropic",
+    inPerMTok: 2,
+    outPerMTok: 10,
+  },
+  {
+    id: "claude-opus-5",
+    label: "Claude Opus 5",
+    provider: "anthropic",
+    inPerMTok: 5,
+    outPerMTok: 25,
+  },
+  {
+    id: "gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    provider: "openai",
+    inPerMTok: 2,
+    outPerMTok: 12,
+  },
+  {
+    id: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    provider: "openai",
+    inPerMTok: 0.2,
+    outPerMTok: 1.2,
+  },
 ] as const;
 type AiModelId = (typeof AI_MODELS)[number]["id"];
 const MODEL_STORE = "simpleslr-ai-model";
@@ -49,6 +75,29 @@ function keyStoreFor(provider: "anthropic" | "openai"): string {
 }
 function providerOf(model: AiModelId): "anthropic" | "openai" {
   return AI_MODELS.find((m) => m.id === model)?.provider ?? "anthropic";
+}
+
+// Rough cost preview for one AI pass over the open paper. A text page
+// runs about 3000 characters (~750 tokens); the prompt and concept
+// vocabulary add a fixed overhead, and a typical response with quotes
+// and notes runs about 2000 output tokens. An order-of-magnitude guide
+// rather than a quote, so it is always shown with a tilde.
+function estimateCost(
+  model: (typeof AI_MODELS)[number],
+  pages: number
+): number {
+  const inputTokens = pages * 750 + 1500;
+  const outputTokens = 2000;
+  return (
+    (inputTokens * model.inPerMTok + outputTokens * model.outPerMTok) /
+    1_000_000
+  );
+}
+
+function formatCost(usd: number): string {
+  if (usd < 0.01) return "<1¢";
+  if (usd < 1) return `~${Math.round(usd * 100)}¢`;
+  return `~$${usd.toFixed(2)}`;
 }
 
 // ----------------------------------------------------------------------
@@ -1746,11 +1795,14 @@ export default function ReadClient({
                 value={aiModel}
                 onChange={(e) => chooseModel(e.target.value as AiModelId)}
                 className="mb-1.5 h-8 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                title="Which model reads the paper; the matching provider's API key is used"
+                title="Which model reads the paper; the matching provider's API key is used. Prices are rough estimates for one pass over this paper."
               >
                 {AI_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
+                    {numPages > 0
+                      ? ` · ${formatCost(estimateCost(m, numPages))}`
+                      : ""}
                   </option>
                 ))}
               </select>
@@ -1761,15 +1813,13 @@ export default function ReadClient({
                     {providerOf(aiModel) === "anthropic"
                       ? "Anthropic"
                       : "OpenAI"}{" "}
-                    API key. It stays in this browser only and is sent
-                    straight to the provider for each run, never stored on
-                    the server.{" "}
+                    API key.{" "}
                     <button
                       type="button"
                       onClick={openKeyInfo}
                       className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
                     >
-                      How this works, and how to get a key
+                      How your key is handled, and how to get one
                     </button>
                   </p>
                   <div className="flex gap-1.5">
@@ -1902,7 +1952,7 @@ export default function ReadClient({
                   role="dialog"
                   aria-label="About your API key"
                   onClick={(e) => e.stopPropagation()}
-                  className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+                  className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 text-left shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
                 >
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1986,15 +2036,16 @@ export default function ReadClient({
 
                     <section>
                       <h3 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
-                        What it costs
+                        Predicted costs
                       </h3>
                       <p className="text-zinc-600 dark:text-zinc-400">
                         One pass reads a single paper. Depending on paper
                         length, that is usually around a cent with GPT-5.6
                         Luna, roughly 5 to 15 cents with Claude Sonnet 5 or
                         GPT-5.6 Terra, and a few tens of cents with Claude
-                        Opus 5. Exact usage shows up in your provider
-                        dashboard.
+                        Opus 5. The model picker shows a live estimate for
+                        the paper you have open, and exact usage shows up in
+                        your provider dashboard.
                       </p>
                     </section>
 

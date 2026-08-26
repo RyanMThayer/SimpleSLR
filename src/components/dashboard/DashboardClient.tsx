@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -20,6 +20,13 @@ export default function DashboardClient({ userId }: { userId: string }) {
   const [showJoin, setShowJoin] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  // A freshly minted sign in token can be rejected for a short window
+  // (clock skew between Supabase's auth and data services). The fetch
+  // layer already absorbs small skews; this counter keeps retrying
+  // quietly on the landing page if the window is longer, so users see
+  // "Loading..." instead of a raw JWT error right after signing in.
+  const jwtRetries = useRef(0);
+  const [retryTick, setRetryTick] = useState(0);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -28,15 +35,23 @@ export default function DashboardClient({ userId }: { userId: string }) {
       .select("*")
       .order("created_at", { ascending: false });
     if (error) {
+      if (/\bjwt\b/i.test(error.message) && jwtRetries.current < 10) {
+        jwtRetries.current += 1;
+        setTimeout(() => setRetryTick((t) => t + 1), 2500);
+        return;
+      }
       setError(
         error.message.includes("does not exist") ||
           error.message.includes("schema cache")
           ? "The database schema is missing. Run supabase/migrations/0001_phase1.sql in the Supabase SQL Editor, then reload."
-          : error.message
+          : /\bjwt\b/i.test(error.message)
+            ? "Your sign in has not finished settling in, which can take a moment right after a password change. Try reloading; if it keeps happening, sign out and back in."
+            : error.message
       );
       setProjects([]);
       return;
     }
+    jwtRetries.current = 0;
     const withStats: ProjectWithStats[] = await Promise.all(
       (data as Project[]).map(async (p) => {
         const [records, done] = await Promise.all([
@@ -67,10 +82,11 @@ export default function DashboardClient({ userId }: { userId: string }) {
   }, [userId]);
 
   useEffect(() => {
-    // Fetch-on-mount: state updates happen after awaits inside load().
+    // Fetch on mount, and again on each scheduled JWT skew retry;
+    // state updates happen after awaits inside load().
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-  }, [load]);
+  }, [load, retryTick]);
 
   async function createProject(e: React.FormEvent) {
     e.preventDefault();
