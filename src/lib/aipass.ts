@@ -159,3 +159,56 @@ export function verifyQuote(
 export function normQuote(q: string): string {
   return q.toLowerCase().replace(/\s+/g, " ").trim();
 }
+
+/**
+ * The vocabulary block exactly as the AI pass sends it. Shared with
+ * the client so the cost preview can measure the true prompt overhead
+ * instead of guessing it.
+ */
+export function vocabBlock(
+  concepts: { label: string; description?: string | null }[]
+): string {
+  return concepts.length > 0
+    ? concepts
+        .map((c) => `- ${c.label}${c.description ? `: ${c.description}` : ""}`)
+        .join("\n")
+    : "(none yet - propose the concepts this paper evidences)";
+}
+
+/**
+ * The system prompt for the AI pass. Lives here rather than in the
+ * route so the client's cost preview measures the exact instruction
+ * text that will be sent; there is one source of truth.
+ */
+export function systemPrompt(
+  rq: string | null,
+  criteria: string | null
+): string {
+  return [
+    "You assist a Webster and Watson style literature review. The team builds a concept matrix: rows are papers, columns are CONCEPTS, and a checkmark means a paper evidences that concept.",
+    "Work from this ONE paper alone. Your job: find where it evidences existing vocabulary concepts, and propose new concepts only when nothing in the vocabulary fits even loosely.",
+    "",
+    `Research question of the review: ${rq?.trim() || "(not recorded)"}`,
+    `Inclusion criteria: ${criteria?.trim() || "(not recorded)"}`,
+    "",
+    "What makes a good concept (a matrix column):",
+    "- A broad, reusable theme, mechanism, method family, or outcome, named in 1 to 4 words. It must pass this test: a DIFFERENT paper in this review could plausibly also earn a checkmark for it. If it cannot, broaden the concept or drop it. Aim the granularity at the level of the research question above.",
+    "- Keep specificity in the quotes, not in the concept name; several specific quotes gathered under one broad concept is acceptable and encouraged.",
+    "",
+    "What counts as evidence (the standard is logical, not lexical):",
+    "- A quote evidences a concept only when the passage, read in its surrounding context, shows this paper genuinely engages with the concept. Sharing a word or phrase with the concept's name is NOT evidence by itself.",
+    "- Words carry multiple senses. Confirm that the sense used in the passage matches the concept's meaning before using it.",
+    "- When a concept implies the paper DID something (a method, an analysis, a design), the passage must show this paper doing it. Passages that mention it about OTHER work (related work, citations), as future work, as a limitation, or in negation are not evidence.",
+    "- Before returning, re-read each candidate quote in its surrounding context and drop any whose connection to the concept is lexical rather than logical.",
+    "",
+    "Budget: at most 8 concepts for this paper. If you find more themes, group them under broader concepts until they fit the budget.",
+    "",
+    'Return STRICT JSON only, no prose: {"concepts":[{"matched":"...","label":"...","definition":"...","quotes":[{"page":1,"quote":"...","note":"..."}]}]}',
+    "Rules:",
+    '- "matched": the EXACT label of the existing vocabulary concept this evidence belongs to, or "new" only when none fits. Prefer matching.',
+    '- "label": the concept name (the existing label verbatim when matched; your new 1 to 4 word name otherwise).',
+    '- "definition": one sentence, new concepts only.',
+    "- quotes: 1 to 5 passages per concept, each copied verbatim, character for character, from the page it cites (the paper text is labeled [Page N]). Never paraphrase, never merge distant sentences, never invent text. A quote is roughly one to three sentences.",
+    '- "note" on a quote is REQUIRED: one sentence explaining why the passage, in context, evidences the concept. If the honest explanation is only that the wording overlaps, discard the quote instead.',
+  ].join("\n");
+}

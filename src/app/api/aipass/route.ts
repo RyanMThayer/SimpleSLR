@@ -5,7 +5,9 @@ import {
   normQuote,
   normalizeNewConceptLabel,
   parseModelJson,
+  systemPrompt,
   verifyQuote,
+  vocabBlock,
 } from "@/lib/aipass";
 import { installPdfNodeShims } from "@/lib/pdfNodeShims";
 
@@ -74,35 +76,10 @@ async function extractAllPages(
   }
 }
 
-function systemPrompt(rq: string | null, criteria: string | null): string {
-  return [
-    "You assist a Webster and Watson style literature review. The team builds a concept matrix: rows are papers, columns are CONCEPTS, and a checkmark means a paper evidences that concept.",
-    "Work from this ONE paper alone. Your job: find where it evidences existing vocabulary concepts, and propose new concepts only when nothing in the vocabulary fits even loosely.",
-    "",
-    `Research question of the review: ${rq?.trim() || "(not recorded)"}`,
-    `Inclusion criteria: ${criteria?.trim() || "(not recorded)"}`,
-    "",
-    "What makes a good concept (a matrix column):",
-    "- A broad, reusable theme, mechanism, method family, or outcome, named in 1 to 4 words. It must pass this test: a DIFFERENT paper in this review could plausibly also earn a checkmark for it. If it cannot, broaden the concept or drop it. Aim the granularity at the level of the research question above.",
-    "- Keep specificity in the quotes, not in the concept name; several specific quotes gathered under one broad concept is acceptable and encouraged.",
-    "",
-    "What counts as evidence (the standard is logical, not lexical):",
-    "- A quote evidences a concept only when the passage, read in its surrounding context, shows this paper genuinely engages with the concept. Sharing a word or phrase with the concept's name is NOT evidence by itself.",
-    "- Words carry multiple senses. Confirm that the sense used in the passage matches the concept's meaning before using it.",
-    "- When a concept implies the paper DID something (a method, an analysis, a design), the passage must show this paper doing it. Passages that mention it about OTHER work (related work, citations), as future work, as a limitation, or in negation are not evidence.",
-    "- Before returning, re-read each candidate quote in its surrounding context and drop any whose connection to the concept is lexical rather than logical.",
-    "",
-    "Budget: at most 8 concepts for this paper. If you find more themes, group them under broader concepts until they fit the budget.",
-    "",
-    'Return STRICT JSON only, no prose: {"concepts":[{"matched":"...","label":"...","definition":"...","quotes":[{"page":1,"quote":"...","note":"..."}]}]}',
-    "Rules:",
-    '- "matched": the EXACT label of the existing vocabulary concept this evidence belongs to, or "new" only when none fits. Prefer matching.',
-    '- "label": the concept name (the existing label verbatim when matched; your new 1 to 4 word name otherwise).',
-    '- "definition": one sentence, new concepts only.',
-    "- quotes: 1 to 5 passages per concept, each copied verbatim, character for character, from the page it cites (the paper text is labeled [Page N]). Never paraphrase, never merge distant sentences, never invent text. A quote is roughly one to three sentences.",
-    '- "note" on a quote is REQUIRED: one sentence explaining why the passage, in context, evidences the concept. If the honest explanation is only that the wording overlaps, discard the quote instead.',
-  ].join("\n");
-}
+// systemPrompt and vocabBlock live in @/lib/aipass, shared with the
+// client's cost preview so both measure the same strings.
+
+type ModelUsage = { inputTokens: number; outputTokens: number };
 
 /** One model call; returns the response text or an error message. */
 async function callModel(
@@ -110,7 +87,7 @@ async function callModel(
   apiKey: string,
   system: string,
   userPrompt: string
-): Promise<{ text?: string; error?: string }> {
+): Promise<{ text?: string; error?: string; usage?: ModelUsage }> {
   const provider = MODELS[model];
   try {
     if (provider === "anthropic") {
@@ -141,7 +118,19 @@ async function callModel(
         .filter((b) => b.type === "text")
         .map((b) => b.text ?? "")
         .join("");
-      return { text };
+      const au = (
+        data as {
+          usage?: { input_tokens?: number; output_tokens?: number };
+        }
+      )?.usage;
+      return {
+        text,
+        usage:
+          typeof au?.input_tokens === "number" &&
+          typeof au?.output_tokens === "number"
+            ? { inputTokens: au.input_tokens, outputTokens: au.output_tokens }
+            : undefined,
+      };
     }
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -171,7 +160,19 @@ async function callModel(
           choices?: { message?: { content?: string | null } }[];
         }
       )?.choices?.[0]?.message?.content ?? "";
-    return { text };
+    const ou = (
+      data as {
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      }
+    )?.usage;
+    return {
+      text,
+      usage:
+        typeof ou?.prompt_tokens === "number" &&
+        typeof ou?.completion_tokens === "number"
+          ? { inputTokens: ou.prompt_tokens, outputTokens: ou.completion_tokens }
+          : undefined,
+    };
   } catch {
     return { error: `Could not reach the ${provider} API.` };
   }
@@ -299,24 +300,16 @@ export async function POST(request: Request) {
     total += content.length;
   }
 
-  const vocab =
-    concepts.length > 0
-      ? concepts
-          .map(
-            (c) => `- ${c.label}${c.description ? `: ${c.description}` : ""}`
-          )
-          .join("\n")
-      : "(none yet - propose the concepts this paper evidences)";
+  const vocab = vocabBlock(concepts);
 
   const userPrompt = `Existing concept vocabulary:\n${vocab}\n\nPaper title: ${rec.title}\n\n${paperParts.join("\n\n")}`;
+  const system = systemPrompt(
+    proj?.research_question ?? null,
+    proj?.inclusion_criteria ?? null
+  );
 
   // One call to the chosen provider with the caller's own key.
-  const call = await callModel(
-    model,
-    apiKey,
-    systemPrompt(proj?.research_question ?? null, proj?.inclusion_criteria ?? null),
-    userPrompt
-  );
+  const call = await callModel(model, apiKey, system, userPrompt);
   if (call.error || !call.text) {
     return NextResponse.json({
       error: call.error ?? "The model returned an empty response.",
@@ -429,5 +422,10 @@ export async function POST(request: Request) {
     droppedBadLabel,
     pages: pages.length,
     truncated,
+    // The provider's billed usage plus the exact characters we sent;
+    // the client uses the pair to calibrate its cost preview.
+    usage: call.usage
+      ? { ...call.usage, inputChars: system.length + userPrompt.length }
+      : null,
   });
 }

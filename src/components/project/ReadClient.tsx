@@ -13,6 +13,14 @@ import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import { buildAnchor, findAnchor, snapToWords } from "@/lib/anchors";
 import { cleanQuote } from "@/lib/concepts";
+import { systemPrompt, vocabBlock } from "@/lib/aipass";
+import {
+  estimateCost,
+  formatCost,
+  updateCalib,
+  type Calib,
+  type RunUsage,
+} from "@/lib/costEstimate";
 import type {
   Concept,
   ConceptExcerpt,
@@ -77,27 +85,19 @@ function providerOf(model: AiModelId): "anthropic" | "openai" {
   return AI_MODELS.find((m) => m.id === model)?.provider ?? "anthropic";
 }
 
-// Rough cost preview for one AI pass over the open paper. A text page
-// runs about 3000 characters (~750 tokens); the prompt and concept
-// vocabulary add a fixed overhead, and a typical response with quotes
-// and notes runs about 2000 output tokens. An order-of-magnitude guide
-// rather than a quote, so it is always shown with a tilde.
-function estimateCost(
-  model: (typeof AI_MODELS)[number],
-  pages: number
-): number {
-  const inputTokens = pages * 750 + 1500;
-  const outputTokens = 2000;
-  return (
-    (inputTokens * model.inPerMTok + outputTokens * model.outPerMTok) /
-    1_000_000
-  );
-}
-
-function formatCost(usd: number): string {
-  if (usd < 0.01) return "<1¢";
-  if (usd < 1) return `~${Math.round(usd * 100)}¢`;
-  return `~$${usd.toFixed(2)}`;
+// Cost preview persistence: per-model chars-per-token ratio and
+// average output length, learned from the billed usage of real runs
+// (see src/lib/costEstimate.ts). Per browser, like the keys.
+const CALIB_STORE = "simpleslr-cost-calib";
+function readCalib(): Calib {
+  try {
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(CALIB_STORE) ?? "{}"
+    );
+    return parsed && typeof parsed === "object" ? (parsed as Calib) : {};
+  } catch {
+    return {};
+  }
 }
 
 // ----------------------------------------------------------------------
@@ -603,6 +603,10 @@ export default function ReadClient({
     openai: false,
   });
   const [aiModel, setAiModel] = useState<AiModelId>("claude-sonnet-5");
+  // Cost preview inputs: the open paper's measured character count
+  // (null until counted, 0 for scans) and the learned calibration.
+  const [docChars, setDocChars] = useState<number | null>(null);
+  const [calib, setCalib] = useState<Calib>({});
   const [decidingSug, setDecidingSug] = useState<string | null>(null);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [conceptDraft, setConceptDraft] = useState("");
@@ -739,6 +743,7 @@ export default function ReadClient({
     setDoc(null);
     setNumPages(0);
     setSel(null);
+    setDocChars(null);
     if (!current?.fulltext_path) return;
     setPdfBusy(true);
     (async () => {
@@ -772,6 +777,25 @@ export default function ReadClient({
       setDoc(d);
       setNumPages(d.numPages);
       setError(null);
+      // Count the paper's real characters for the cost preview. Runs
+      // in pdf.js's worker after a beat so first-page rendering wins
+      // the queue; the whole pass takes about half a second and never
+      // touches the main thread or delays anything visible.
+      (async () => {
+        await new Promise((r) => setTimeout(r, 350));
+        let chars = 0;
+        for (let i = 1; i <= d.numPages; i++) {
+          if (cancelled) return;
+          const pg = await d.getPage(i);
+          const tc = await pg.getTextContent();
+          for (const it of tc.items) {
+            if ("str" in it) chars += it.str.length;
+          }
+        }
+        if (!cancelled) setDocChars(chars);
+      })().catch(() => {
+        // Preview only; the dropdown falls back to the page heuristic.
+      });
     })()
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -858,6 +882,31 @@ export default function ReadClient({
     return m;
   }, [paperSuggestions]);
 
+  // Predicted input size of one AI pass over the open paper: measured
+  // characters once counted (page heuristic until then; 0 means a scan
+  // with nothing to send), plus prompt overhead measured from the same
+  // strings the server sends (page labels approximated).
+  const estInputChars = useMemo(() => {
+    if (numPages === 0) return null;
+    if (docChars === 0) return 0;
+    const paper = docChars ?? numPages * 3000;
+    const overhead =
+      systemPrompt(project.research_question, project.inclusion_criteria)
+        .length +
+      vocabBlock(concepts).length +
+      (current?.title?.length ?? 60) +
+      numPages * 12 +
+      40;
+    return paper + overhead;
+  }, [
+    docChars,
+    numPages,
+    concepts,
+    project.research_question,
+    project.inclusion_criteria,
+    current?.title,
+  ]);
+
   // Restore the model choice, and check for the matching provider key
   // whenever the choice changes.
   useEffect(() => {
@@ -867,6 +916,7 @@ export default function ReadClient({
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setAiModel(stored as AiModelId);
       }
+      setCalib(readCalib());
     } catch {
       // Storage unavailable: default model stands.
     }
@@ -1438,6 +1488,25 @@ export default function ReadClient({
         if (data.truncated) bits.push("long paper truncated");
         setAiErr(false);
         setAiMsg(bits.join(" · ") + ".");
+        // Fold the provider's billed usage into this model's cost
+        // calibration, so future previews use the real ratio.
+        const u = data.usage as RunUsage | null | undefined;
+        if (
+          u &&
+          typeof u.inputChars === "number" &&
+          typeof u.inputTokens === "number" &&
+          typeof u.outputTokens === "number"
+        ) {
+          setCalib((prev) => {
+            const next = updateCalib(prev, aiModel, u);
+            try {
+              localStorage.setItem(CALIB_STORE, JSON.stringify(next));
+            } catch {
+              // Preview-only state; losing it costs nothing.
+            }
+            return next;
+          });
+        }
         const supabase = createClient();
         const { data: sugRows } = await supabase
           .from("concept_suggestions")
@@ -1795,13 +1864,20 @@ export default function ReadClient({
                 value={aiModel}
                 onChange={(e) => chooseModel(e.target.value as AiModelId)}
                 className="mb-1.5 h-8 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                title="Which model reads the paper; the matching provider's API key is used. Prices are rough estimates for one pass over this paper."
+                title={(() => {
+                  const base =
+                    "Which model reads the paper; the matching provider's API key is used.";
+                  const sel = AI_MODELS.find((m) => m.id === aiModel);
+                  if (!sel || !estInputChars) return base;
+                  const est = estimateCost(sel, estInputChars, calib);
+                  return `${base} This paper: ${formatCost(est.typical)} expected, ${formatCost(est.max)} at most (response length is capped). Estimates sharpen after each real run.`;
+                })()}
               >
                 {AI_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
-                    {numPages > 0
-                      ? ` · ${formatCost(estimateCost(m, numPages))}`
+                    {estInputChars
+                      ? ` · ${formatCost(estimateCost(m, estInputChars, calib).typical)}`
                       : ""}
                   </option>
                 ))}
@@ -2044,8 +2120,13 @@ export default function ReadClient({
                         Luna, roughly 5 to 15 cents with Claude Sonnet 5 or
                         GPT-5.6 Terra, and a few tens of cents with Claude
                         Opus 5. The model picker shows a live estimate for
-                        the paper you have open, and exact usage shows up in
-                        your provider dashboard.
+                        the paper you have open, based on its real measured
+                        text, and the estimates sharpen automatically after
+                        each run using the exact usage your provider
+                        reports. Response length is capped, so every pass
+                        has a known maximum cost, shown when you hover the
+                        picker. Exact usage shows up in your provider
+                        dashboard.
                       </p>
                     </section>
 
