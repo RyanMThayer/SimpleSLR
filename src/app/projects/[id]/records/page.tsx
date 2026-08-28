@@ -13,7 +13,7 @@ export default async function RecordsPage({
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-zinc-950">
       <AppHeader email={user.email} projectName={project.name} projectId={project.id} />
-      <RecordsClient projectId={project.id} userId={user.id} />
+      <RecordsClient project={project} userId={user.id} />
     </div>
   );
 }

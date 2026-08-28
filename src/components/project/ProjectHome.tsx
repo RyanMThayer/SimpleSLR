@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { outcomeOf } from "@/lib/outcomes";
+import { requiredFor, settledOutcome } from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import type { Project, ProjectMember } from "@/lib/types";
 
 type MemberProgress = ProjectMember & {
@@ -88,6 +89,7 @@ export default function ProjectHome({
       if (!data || data.length < 1000) break;
     }
     const ftDecidedBy = new Map<string, Set<string>>();
+    const ftCountByRecord = new Map<string, number>();
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase
         .from("screening_decisions")
@@ -99,9 +101,16 @@ export default function ProjectHome({
         const set = ftDecidedBy.get(d.decided_by) ?? new Set<string>();
         set.add(d.record_id);
         ftDecidedBy.set(d.decided_by, set);
+        ftCountByRecord.set(
+          d.record_id,
+          (ftCountByRecord.get(d.record_id) ?? 0) + 1
+        );
       });
       if (!data || data.length < 1000) break;
     }
+    const resMap = await fetchResolutions(supabase, project.id);
+    const taReq = requiredFor(project, "title_abstract");
+    const ftReq = requiredFor(project, "full_text");
     type Slim = {
       id: string;
       assigned_to: string | null;
@@ -120,7 +129,12 @@ export default function ProjectHome({
       if (!data || data.length < 1000) break;
     }
     const eligible = activeSlim.filter(
-      (r) => outcomeOf(taByRecord.get(r.id) ?? []) === "included"
+      (r) =>
+        settledOutcome(
+          taByRecord.get(r.id) ?? [],
+          resMap.get(resKey("title_abstract", r.id)),
+          taReq
+        ) === "included"
     );
     setFtEligible(eligible.length);
     setFtNotRetrieved(
@@ -140,10 +154,26 @@ export default function ProjectHome({
       const taSet = taDecidedBy.get(m.user_id) ?? new Set<string>();
       const myAssigned = activeSlim.filter((r) => r.assigned_to === m.user_id);
       const myDecidedActive = activeSlim.filter((r) => taSet.has(r.id));
-      const taUnion = new Set([
-        ...myAssigned.map((r) => r.id),
-        ...myDecidedActive.map((r) => r.id),
-      ]);
+      // Independent screening (quota above 1): assignment pools do not
+      // apply; a member's total is what they decided plus what still
+      // needs an opinion they have not given.
+      const taUnion =
+        taReq > 1
+          ? new Set([
+              ...myDecidedActive.map((r) => r.id),
+              ...activeSlim
+                .filter(
+                  (r) =>
+                    !taSet.has(r.id) &&
+                    (taByRecord.get(r.id)?.length ?? 0) < taReq &&
+                    !resMap.has(resKey("title_abstract", r.id))
+                )
+                .map((r) => r.id),
+            ])
+          : new Set([
+              ...myAssigned.map((r) => r.id),
+              ...myDecidedActive.map((r) => r.id),
+            ]);
 
       const ftSet = ftDecidedBy.get(m.user_id) ?? new Set<string>();
       const retrievable = eligible.filter((r) => r.retrieval_status === null);
@@ -151,10 +181,23 @@ export default function ProjectHome({
         (r) => r.ft_assigned_to === m.user_id
       );
       const myFtDecided = retrievable.filter((r) => ftSet.has(r.id));
-      const ftUnion = new Set([
-        ...myFtAssigned.map((r) => r.id),
-        ...myFtDecided.map((r) => r.id),
-      ]);
+      const ftUnion =
+        ftReq > 1
+          ? new Set([
+              ...myFtDecided.map((r) => r.id),
+              ...retrievable
+                .filter(
+                  (r) =>
+                    !ftSet.has(r.id) &&
+                    (ftCountByRecord.get(r.id) ?? 0) < ftReq &&
+                    !resMap.has(resKey("full_text", r.id))
+                )
+                .map((r) => r.id),
+            ])
+          : new Set([
+              ...myFtAssigned.map((r) => r.id),
+              ...myFtDecided.map((r) => r.id),
+            ]);
 
       return {
         ...m,
@@ -165,7 +208,7 @@ export default function ProjectHome({
       };
     });
     setMembers(progress);
-  }, [project.id]);
+  }, [project]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
@@ -447,14 +490,24 @@ export default function ProjectHome({
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Title and abstract progress
           </h2>
-          <button
-            onClick={distribute}
-            disabled={distributing || unassigned === 0}
-            className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
-            title="Split all unassigned records evenly among team members"
-          >
-            {distributing ? "Distributing..." : "Distribute unassigned"}
-          </button>
+          {requiredFor(project, "title_abstract") <= 1 ? (
+            <button
+              onClick={distribute}
+              disabled={distributing || unassigned === 0}
+              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              title="Split all unassigned records evenly among team members"
+            >
+              {distributing ? "Distributing..." : "Distribute unassigned"}
+            </button>
+          ) : (
+            <span
+              className="text-sm text-zinc-500 dark:text-zinc-400"
+              title="Every record needs its quota of independent opinions; queues balance themselves, so there is nothing to hand out"
+            >
+              Independent screening:{" "}
+              {requiredFor(project, "title_abstract")} opinions per record
+            </span>
+          )}
         </div>
         {message && (
           <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">{message}</p>
@@ -504,14 +557,24 @@ export default function ProjectHome({
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Full text progress
           </h2>
-          <button
-            onClick={distributeFt}
-            disabled={distributingFt || ftUnassignedIds.length === 0}
-            className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
-            title="Split the unassigned full text records evenly among team members"
-          >
-            {distributingFt ? "Distributing..." : "Distribute full text"}
-          </button>
+          {requiredFor(project, "full_text") <= 1 ? (
+            <button
+              onClick={distributeFt}
+              disabled={distributingFt || ftUnassignedIds.length === 0}
+              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              title="Split the unassigned full text records evenly among team members"
+            >
+              {distributingFt ? "Distributing..." : "Distribute full text"}
+            </button>
+          ) : (
+            <span
+              className="text-sm text-zinc-500 dark:text-zinc-400"
+              title="Every record needs its quota of independent opinions; queues balance themselves, so there is nothing to hand out"
+            >
+              Independent screening: {requiredFor(project, "full_text")}{" "}
+              opinions per record
+            </span>
+          )}
         </div>
         <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
           {ftEligible} record(s) included at title/abstract ·{" "}

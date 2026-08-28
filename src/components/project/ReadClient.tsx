@@ -9,7 +9,12 @@ import {
 } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
+import {
+  decisionsByRecord,
+  requiredFor,
+  settledOutcome,
+} from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import { buildAnchor, findAnchor, snapToWords } from "@/lib/anchors";
 import { cleanQuote } from "@/lib/concepts";
@@ -669,10 +674,25 @@ export default function ReadClient({
       }
       const taMap = decisionsByRecord(decs, "title_abstract");
       const ftMap = decisionsByRecord(decs, "full_text");
+      // Settled outcomes only: under independent screening a record
+      // reaches the reading room once both stages hit their opinion
+      // quota (or a resolution) and ended included.
+      const resMap = await fetchResolutions(supabase, project.id);
+      const taReq = requiredFor(project, "title_abstract");
+      const ftReq = requiredFor(project, "full_text");
       const includedIds = [...taMap.entries()]
-        .filter(([id, ta]) =>
-          outcomeOf(ta) === "included" &&
-          outcomeOf(ftMap.get(id) ?? []) === "included"
+        .filter(
+          ([id, ta]) =>
+            settledOutcome(
+              ta,
+              resMap.get(resKey("title_abstract", id)),
+              taReq
+            ) === "included" &&
+            settledOutcome(
+              ftMap.get(id) ?? [],
+              resMap.get(resKey("full_text", id)),
+              ftReq
+            ) === "included"
         )
         .map(([id]) => id);
 
@@ -737,7 +757,7 @@ export default function ReadClient({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [project.id]);
+  }, [project]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().

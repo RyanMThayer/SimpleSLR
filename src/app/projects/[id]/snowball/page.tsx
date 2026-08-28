@@ -13,7 +13,7 @@ export default async function SnowballPage({
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-zinc-950">
       <AppHeader email={user.email} projectName={project.name} projectId={project.id} />
-      <SnowballClient projectId={project.id} userId={user.id} />
+      <SnowballClient project={project} userId={user.id} />
     </div>
   );
 }

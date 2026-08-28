@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
-import { outcomeOf } from "@/lib/outcomes";
+import { requiredFor, settledOutcome } from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import {
   buildExcerptsCsv,
@@ -93,8 +94,16 @@ export default function ConceptsClient({
         list.push(d);
         byRecord.set(d.record_id, list);
       }
+      const resMap = await fetchResolutions(supabase, projectId);
       const includeIds = [...byRecord.entries()]
-        .filter(([, decs]) => outcomeOf(decs) === "included")
+        .filter(
+          ([id, decs]) =>
+            settledOutcome(
+              decs,
+              resMap.get(resKey("title_abstract", id)),
+              requiredFor(project, "title_abstract")
+            ) === "included"
+        )
         .map(([id]) => id);
       const recs: RecordRow[] = [];
       for (let i = 0; i < includeIds.length; i += 100) {
@@ -125,7 +134,14 @@ export default function ConceptsClient({
       }
       const ftSet = new Set(
         [...ftByRecord.entries()]
-          .filter(([, decs]) => outcomeOf(decs) === "included")
+          .filter(
+            ([id, decs]) =>
+              settledOutcome(
+                decs,
+                resMap.get(resKey("full_text", id)),
+                requiredFor(project, "full_text")
+              ) === "included"
+          )
           .map(([id]) => id)
       );
       setRecords(recs);
@@ -135,7 +151,7 @@ export default function ConceptsClient({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load papers.");
     }
-  }, [projectId]);
+  }, [projectId, project]);
 
   const loadConcepts = useCallback(async () => {
     const supabase = createClient();

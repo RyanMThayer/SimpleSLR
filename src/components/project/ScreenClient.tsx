@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { kbd } from "@/lib/ui";
-import { outcomeOf } from "@/lib/outcomes";
+import { requiredFor, settledOutcome, outcomeOf } from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { cleanQuote } from "@/lib/concepts";
 import {
   fulltextPathFor,
@@ -17,6 +18,7 @@ import type {
   InclusionCode,
   Project,
   RecordRow,
+  ScreeningResolution,
   Stage,
 } from "@/lib/types";
 
@@ -203,8 +205,16 @@ export default function ScreenClient({
       >
     >
   >(new Map());
-  // Active records with at least one decision at this stage (any member).
+  // Active records with at least one decision at this stage (any
+  // member); under independent screening, only REVEALED records count.
   const [teamScreened, setTeamScreened] = useState(0);
+  // Conflict resolutions for the project, keyed stage:record_id.
+  const [resolutions, setResolutions] = useState<
+    Map<string, ScreeningResolution>
+  >(new Map());
+  const [resolveBusy, setResolveBusy] = useState(false);
+  // Opinions this stage requires per record (1 = classic screening).
+  const required = requiredFor(project, stage);
   const [memberNames, setMemberNames] = useState<Map<string, string>>(
     new Map()
   );
@@ -364,7 +374,11 @@ export default function ScreenClient({
     setMyDecisions(myDecs);
     setTeamDecisions(teamMap);
 
-    // Screened = active records with at least one decision from anyone.
+    // Conflict resolutions (empty on projects before migration 0017).
+    const resMap = await fetchResolutions(supabase, project.id);
+    setResolutions(resMap);
+    const req = requiredFor(project, stage);
+
     const activeIds = new Set<string>();
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase
@@ -376,7 +390,16 @@ export default function ScreenClient({
       (data ?? []).forEach((r) => activeIds.add(r.id));
       if (!data || data.length < 1000) break;
     }
-    const screenedIds = [...teamMap.keys()].filter((id) => activeIds.has(id));
+    // Screened = active records with at least one decision from anyone;
+    // under independent screening only REVEALED records (quota reached
+    // or resolved) belong here, since blinded ones must stay unseen.
+    const screenedIds = [...teamMap.keys()].filter(
+      (id) =>
+        activeIds.has(id) &&
+        (req <= 1 ||
+          (teamMap.get(id)?.size ?? 0) >= req ||
+          resMap.has(resKey(stage, id)))
+    );
     setTeamScreened(screenedIds.length);
 
     if (reviewing) {
@@ -424,9 +447,17 @@ export default function ScreenClient({
         });
         if (!data || data.length < 1000) break;
       }
-      const includeIds = [...taByRecord.entries()]
-        .filter(([, decs]) => outcomeOf(decs) === "included")
-        .map(([id]) => id);
+      // Eligible once the title/abstract outcome is SETTLED as included
+      // (quota reached with agreement, or a conflict resolved include).
+      const taReq = requiredFor(project, "title_abstract");
+      const includeIds = [...activeIds].filter(
+        (id) =>
+          settledOutcome(
+            taByRecord.get(id) ?? [],
+            resMap.get(resKey("title_abstract", id)),
+            taReq
+          ) === "included"
+      );
 
       const recs: RecordRow[] = [];
       for (let i = 0; i < includeIds.length; i += 100) {
@@ -442,15 +473,24 @@ export default function ScreenClient({
       const retrievable = recs.filter(
         (r) => r.retrieval_status !== "not_retrieved"
       );
-      // Full text assignment rule: my undecided ft-assigned records if
-      // any remain, otherwise the unassigned pool (surfaces newly
-      // eligible records before anyone redistributes).
-      const mineAssigned = retrievable.filter(
-        (r) => r.ft_assigned_to === userId
-      );
-      const mineRemaining = mineAssigned.filter((r) => !decided.has(r.id));
-      const pool = retrievable.filter((r) => r.ft_assigned_to === null);
-      const poolRemaining = pool.filter((r) => !decided.has(r.id));
+      // Under independent screening a record leaves everyone's queue
+      // once it has its quota of opinions; assignment pools are ignored
+      // because coverage is governed by the quota, not by handout.
+      const needsMe = (r: RecordRow) =>
+        !decided.has(r.id) &&
+        (req <= 1 ||
+          ((teamMap.get(r.id)?.size ?? 0) < req &&
+            !resMap.has(resKey(stage, r.id))));
+      const mineAssigned =
+        req > 1
+          ? retrievable
+          : retrievable.filter((r) => r.ft_assigned_to === userId);
+      const mineRemaining = mineAssigned.filter(needsMe);
+      const pool =
+        req > 1
+          ? retrievable
+          : retrievable.filter((r) => r.ft_assigned_to === null);
+      const poolRemaining = pool.filter(needsMe);
       const eligible = mineRemaining.length > 0 ? mineAssigned : pool;
       const remaining =
         mineRemaining.length > 0 ? mineRemaining : poolRemaining;
@@ -467,6 +507,44 @@ export default function ScreenClient({
       remaining.sort((a, b) => a.created_at.localeCompare(b.created_at));
       setError(null);
       setQueue(remaining);
+      setIdx(0);
+      return;
+    }
+
+    if (req > 1) {
+      // Independent screening: one shared pool. My queue is every
+      // active record I have not decided that is still below its
+      // opinion quota; workload self-balances across reviewers and
+      // assignment pools do not apply.
+      const recs: RecordRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error: rErr } = await supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", project.id)
+          .eq("status", "active")
+          .order("created_at")
+          .range(from, from + 999);
+        if (rErr) {
+          setError(rErr.message);
+          return;
+        }
+        recs.push(...((data ?? []) as RecordRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      const remaining = recs.filter(
+        (r) =>
+          !decided.has(r.id) &&
+          (teamMap.get(r.id)?.size ?? 0) < req &&
+          !resMap.has(resKey(stage, r.id))
+      );
+      // Personal progress: what I decided, over what has ever been
+      // available to me (my decisions plus records still needing me).
+      const myActive = [...decided].filter((id) => activeIds.has(id)).length;
+      setMineTotal(myActive + remaining.length);
+      setMineDone(myActive);
+      setError(null);
+      setQueue(remaining.slice(0, QUEUE_PAGE));
       setIdx(0);
       return;
     }
@@ -532,6 +610,9 @@ export default function ScreenClient({
     setError(null);
     setQueue(remaining);
     setIdx(0);
+    // requiredFor reads two scalar columns off the project row; the row
+    // itself is a stable server prop, so project.id stands in for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, userId, stage, reviewing]);
 
   useEffect(() => {
@@ -666,6 +747,48 @@ export default function ScreenClient({
       if (nq.length === 0) load();
     },
     [current, saving, project.id, userId, queue, idx, load, stage, reviewing]
+  );
+
+  // The team's final verdict on a revealed conflict; any member may
+  // record it after discussion, and the row logs who and when.
+  const resolveConflict = useCallback(
+    async (decision: Decision, reasonId: string | null = null) => {
+      if (!current || resolveBusy) return;
+      if (stage === "full_text" && decision === "exclude" && !reasonId) {
+        return;
+      }
+      setResolveBusy(true);
+      const supabase = createClient();
+      const { data, error: rErr } = await supabase
+        .from("screening_resolutions")
+        .upsert(
+          {
+            project_id: project.id,
+            record_id: current.id,
+            stage,
+            decision,
+            reason_id: reasonId,
+            resolved_by: userId,
+          },
+          { onConflict: "record_id,stage" }
+        )
+        .select()
+        .single();
+      setResolveBusy(false);
+      if (rErr) {
+        setError(rErr.message);
+        return;
+      }
+      setResolutions((m) => {
+        const next = new Map(m);
+        next.set(
+          resKey(stage, current.id),
+          data as unknown as ScreeningResolution
+        );
+        return next;
+      });
+    },
+    [current, resolveBusy, project.id, stage, userId]
   );
 
   const markNoAccess = useCallback(async () => {
@@ -1288,13 +1411,26 @@ export default function ScreenClient({
                 );
               };
               const mine = myDecisions.get(current.id);
-              const others = [
-                ...(teamDecisions.get(current.id) ?? []),
-              ].filter(([uid]) => uid !== userId);
-              const conflicting =
-                mine && others.some(([, d]) => d.decision !== mine.decision);
+              const perUser = teamDecisions.get(current.id) ?? new Map();
+              const res = resolutions.get(resKey(stage, current.id));
+              // Blinded records never show teammates' decisions; the
+              // review queue only holds revealed records under
+              // independent screening, but guard here regardless.
+              const revealed =
+                required <= 1 || perUser.size >= required || Boolean(res);
+              const others = revealed
+                ? [...perUser].filter(([uid]) => uid !== userId)
+                : [];
+              const teamConflict =
+                revealed && outcomeOf([...perUser.values()]) === "conflict";
               return (
                 <>
+                  {!revealed && (
+                    <p>
+                      Independent screening: teammates&apos; decisions stay
+                      hidden until this record has {required} opinions.
+                    </p>
+                  )}
                   {others.length > 0 && (
                     <p>
                       Team decisions:{" "}
@@ -1313,7 +1449,7 @@ export default function ScreenClient({
                     ) : (
                       <span className="font-medium">none recorded</span>
                     )}
-                    {conflicting && (
+                    {teamConflict && !res && (
                       <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
                         conflict
                       </span>
@@ -1323,6 +1459,51 @@ export default function ScreenClient({
                       ? "press a key to change it, arrows to move on."
                       : "press a key to add yours, arrows to move on."}
                   </p>
+                  {res && (
+                    <p>
+                      Team resolution: {fmt({ decision: res.decision, reason_id: res.reason_id, inclusion_code_id: res.inclusion_code_id })}{" "}
+                      recorded by {memberNames.get(res.resolved_by) ?? "a member"}.
+                    </p>
+                  )}
+                  {teamConflict && !res && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <span>Settle it for the team after discussing:</span>
+                      <button
+                        onClick={() => resolveConflict("include")}
+                        disabled={resolveBusy}
+                        className="rounded-full bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
+                      >
+                        Resolve: include
+                      </button>
+                      {stage === "full_text" ? (
+                        <select
+                          value=""
+                          disabled={resolveBusy}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              resolveConflict("exclude", e.target.value);
+                            }
+                          }}
+                          className="h-6 rounded-lg border border-zinc-300 bg-white px-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                        >
+                          <option value="">Resolve: exclude (reason)...</option>
+                          {reasons.map((r, i) => (
+                            <option key={r.id} value={r.id}>
+                              E{i + 1} {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <button
+                          onClick={() => resolveConflict("exclude")}
+                          disabled={resolveBusy}
+                          className="rounded-full border border-red-400 px-2.5 py-0.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-red-700 dark:text-red-300"
+                        >
+                          Resolve: exclude
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </>
               );
             })()}

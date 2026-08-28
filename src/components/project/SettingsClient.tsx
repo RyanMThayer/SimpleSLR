@@ -11,6 +11,38 @@ export default function SettingsClient({ project }: { project: Project }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Independent screening: opinions required per record and stage.
+  const [reqTa, setReqTa] = useState(project.required_opinions_ta ?? 1);
+  const [reqFt, setReqFt] = useState(project.required_opinions_ft ?? 1);
+  const [savingReq, setSavingReq] = useState(false);
+  const [reqMsg, setReqMsg] = useState<string | null>(null);
+  const independent = reqTa > 1 || reqFt > 1;
+
+  async function saveOpinions(nextTa: number, nextFt: number) {
+    setSavingReq(true);
+    setReqMsg(null);
+    setError(null);
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("projects")
+      .update({
+        required_opinions_ta: nextTa,
+        required_opinions_ft: nextFt,
+      })
+      .eq("id", project.id);
+    setSavingReq(false);
+    if (upErr) {
+      setError(
+        upErr.message.includes("required_opinions")
+          ? "Run supabase/migrations/0017_independent_screening.sql in the Supabase SQL Editor first, then save again."
+          : upErr.message
+      );
+      return;
+    }
+    setReqTa(nextTa);
+    setReqFt(nextFt);
+    setReqMsg("Saved. Screening queues follow the new rule on next load.");
+  }
 
   function parseKeywords(s: string): string[] {
     return s
@@ -92,6 +124,94 @@ export default function SettingsClient({ project }: { project: Project }) {
             <span className="text-sm text-emerald-600 dark:text-emerald-400">{message}</span>
           )}
         </div>
+      </div>
+
+      <div className="mb-6 flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <div>
+          <h2 className="mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-50">
+            Independent screening
+          </h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            With independent screening on, every record needs the set number
+            of opinions before the team outcome exists, and until then
+            nobody sees anyone else&apos;s decision on it, anywhere.
+            Agreement becomes the team decision; disagreement becomes a
+            conflict any member can settle after discussion, with the
+            settlement logged. Queues balance themselves: each reviewer sees
+            what still needs an opinion they have not given, so with four
+            reviewers and two opinions per record, each covers about half
+            the stack. This is what lets the team write that records were
+            screened independently by multiple reviewers.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Independent screening
+          </span>
+          <button
+            onClick={() =>
+              independent ? saveOpinions(1, 1) : saveOpinions(2, 2)
+            }
+            disabled={savingReq}
+            role="switch"
+            aria-checked={independent}
+            className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${
+              independent
+                ? "bg-teal-700 dark:bg-teal-400"
+                : "bg-zinc-300 dark:bg-zinc-700"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all dark:bg-zinc-950 ${
+                independent ? "left-[22px]" : "left-0.5"
+              }`}
+            />
+          </button>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            {independent
+              ? "On: both stages default to 2 opinions; adjust per stage below."
+              : "Off: classic single screening (1 opinion per record)."}
+          </span>
+        </div>
+        {independent && (
+          <div className="flex flex-wrap gap-6">
+            <label className={labelCls}>
+              Title/abstract: opinions per record
+              <select
+                value={reqTa}
+                onChange={(e) => saveOpinions(Number(e.target.value), reqFt)}
+                disabled={savingReq}
+                className={inputCls}
+              >
+                {[1, 2, 3].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={labelCls}>
+              Full text: opinions per record
+              <select
+                value={reqFt}
+                onChange={(e) => saveOpinions(reqTa, Number(e.target.value))}
+                disabled={savingReq}
+                className={inputCls}
+              >
+                {[1, 2, 3].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        {reqMsg && (
+          <span className="text-sm text-emerald-600 dark:text-emerald-400">
+            {reqMsg}
+          </span>
+        )}
       </div>
 
       {error && (

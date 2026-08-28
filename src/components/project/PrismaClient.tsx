@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { card, btnSecondary as exportBtn } from "@/lib/ui";
 import { buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
-import { decisionsByRecord, outcomeOf } from "@/lib/outcomes";
+import {
+  decisionsByRecord,
+  requiredFor,
+  settledOutcome,
+} from "@/lib/outcomes";
+import { resKey } from "@/lib/resolutions";
 import { buildPrismaSummary, formatLongDate } from "@/lib/prismaSummary";
 import type {
   ExclusionReason,
@@ -14,11 +19,19 @@ import type {
   ProjectDatabase,
   RecordRow,
   ScreeningDecision,
+  ScreeningResolution,
 } from "@/lib/types";
+import { fetchResolutions } from "@/lib/resolutions";
 
 type Data = {
   records: RecordRow[];
   decisions: ScreeningDecision[];
+  // Conflict resolutions keyed stage:record_id, and the opinions each
+  // stage requires: PRISMA counts SETTLED outcomes only, so records
+  // still blinded or in unresolved conflict stay "in screening".
+  resolutions: Map<string, ScreeningResolution>;
+  requiredTa: number;
+  requiredFt: number;
   reasons: ExclusionReason[];
   databases: ProjectDatabase[];
   batches: ImportBatch[];
@@ -129,7 +142,11 @@ function computeCounts(d: Data): Counts {
       continue;
     }
     arm.screened++;
-    const o = outcomeOf(taMap.get(r.id) ?? []);
+    const o = settledOutcome(
+      taMap.get(r.id) ?? [],
+      d.resolutions.get(resKey("title_abstract", r.id)),
+      d.requiredTa
+    );
     if (o === "excluded") {
       taExcluded++;
       arm.taExcluded++;
@@ -159,13 +176,16 @@ function computeCounts(d: Data): Counts {
       continue;
     }
     const decs = ftMap.get(id) ?? [];
-    const o = outcomeOf(decs);
+    const res = d.resolutions.get(resKey("full_text", id));
+    const o = settledOutcome(decs, res, d.requiredFt);
     if (o === "excluded") {
       ftExcluded++;
       arm.ftExcluded++;
-      const withReason = decs.find(
-        (x) => x.decision === "exclude" && x.reason_id
-      );
+      // A resolution's reason wins: it is the team's final word.
+      const withReason =
+        res && res.decision === "exclude" && res.reason_id
+          ? res
+          : decs.find((x) => x.decision === "exclude" && x.reason_id);
       const label = withReason?.reason_id
         ? (reasonLabel.get(withReason.reason_id) ?? "Removed reason")
         : "No reason recorded";
@@ -727,14 +747,25 @@ export default function PrismaClient({ project }: { project: Project }) {
         const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
         if (p) profiles.set(m.user_id, p);
       });
-      const d: Data = { records, decisions, reasons, databases, batches, profiles };
+      const resolutions = await fetchResolutions(supabase, project.id);
+      const d: Data = {
+        records,
+        decisions,
+        resolutions,
+        requiredTa: requiredFor(project, "title_abstract"),
+        requiredFt: requiredFor(project, "full_text"),
+        reasons,
+        databases,
+        batches,
+        profiles,
+      };
       setData(d);
       setCounts(computeCounts(d));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [project.id]);
+  }, [project]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
@@ -809,9 +840,17 @@ export default function PrismaClient({ project }: { project: Project }) {
     const ftMap = decisionsByRecord(data.decisions, "full_text");
     const reasonLabel = new Map(data.reasons.map((r) => [r.id, r.label]));
     const rows = data.records.map((r) => {
-      const ta = outcomeOf(taMap.get(r.id) ?? []);
+      const ta = settledOutcome(
+        taMap.get(r.id) ?? [],
+        data.resolutions.get(resKey("title_abstract", r.id)),
+        data.requiredTa
+      );
       const ft = counts.taRecordIds.has(r.id)
-        ? outcomeOf(ftMap.get(r.id) ?? [])
+        ? settledOutcome(
+            ftMap.get(r.id) ?? [],
+            data.resolutions.get(resKey("full_text", r.id)),
+            data.requiredFt
+          )
         : "";
       const taReasons = (taMap.get(r.id) ?? [])
         .filter((d) => d.reason_id)

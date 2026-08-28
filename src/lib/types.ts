@@ -74,6 +74,10 @@ export type Project = {
   exclusion_criteria: string | null;
   include_keywords: string[];
   exclude_keywords: string[];
+  // Independent screening: opinions required per record and stage
+  // (1 = single screening; absent before migration 0017).
+  required_opinions_ta?: number | null;
+  required_opinions_ft?: number | null;
   invite_code: string;
   search_config: Partial<SearchConfig> | null;
   created_by: string;
@@ -149,6 +153,19 @@ export type ScreeningDecision = {
   note: string | null;
   decided_by: string;
   decided_at: string;
+};
+
+/** The team's final verdict on a record whose opinions conflicted. */
+export type ScreeningResolution = {
+  id: string;
+  project_id: string;
+  record_id: string;
+  stage: Stage;
+  decision: Decision;
+  reason_id: string | null;
+  inclusion_code_id: string | null;
+  resolved_by: string;
+  resolved_at: string;
 };
 
 /** Which seed produced which snowball candidate, per direction. */

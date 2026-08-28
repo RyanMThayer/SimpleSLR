@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { normalizeTitle, normalizeDoi } from "@/lib/normalize";
-import { outcomeOf } from "@/lib/outcomes";
+import {
+  requiredFor,
+  settledOutcome,
+  stageStatus,
+} from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import {
   abstractFromPdfText,
   findMissingAbstracts,
@@ -28,8 +33,10 @@ import type {
   ExclusionReason,
   ImportBatch,
   InclusionCode,
+  Project,
   RecordRow,
   ScreeningDecision,
+  ScreeningResolution,
 } from "@/lib/types";
 
 const PAGE_SIZE = 50;
@@ -68,12 +75,13 @@ type EditForm = {
 };
 
 export default function RecordsClient({
-  projectId,
+  project,
   userId,
 }: {
-  projectId: string;
+  project: Project;
   userId: string;
 }) {
+  const projectId = project.id;
   const [rows, setRows] = useState<RecordRow[] | null>(null);
   const [taDecs, setTaDecs] = useState<Map<string, ScreeningDecision[]>>(
     new Map()
@@ -81,6 +89,10 @@ export default function RecordsClient({
   const [ftDecs, setFtDecs] = useState<Map<string, ScreeningDecision[]>>(
     new Map()
   );
+  // Conflict resolutions keyed stage:record_id (empty pre-migration).
+  const [resolutions, setResolutions] = useState<
+    Map<string, ScreeningResolution>
+  >(new Map());
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
   const [inclusionCodes, setInclusionCodes] = useState<InclusionCode[]>([]);
@@ -228,6 +240,21 @@ export default function RecordsClient({
     let pageRecords: RecordRow[];
     const ta = new Map<string, ScreeningDecision[]>();
     const ft = new Map<string, ScreeningDecision[]>();
+    const resMap = await fetchResolutions(supabase, projectId);
+    // Independent screening: on a record still below its opinion quota,
+    // teammates' decisions are invisible; only your own may show or be
+    // matched against, anywhere in this table.
+    const visibleOf = (
+      rid: string,
+      stg: Stage,
+      list: ScreeningDecision[]
+    ): ScreeningDecision[] => {
+      const req = requiredFor(project, stg);
+      if (req <= 1 || list.length >= req || resMap.has(resKey(stg, rid))) {
+        return list;
+      }
+      return list.filter((d) => d.decided_by === userId);
+    };
     const addDec = (d: ScreeningDecision) => {
       const map = d.stage === "full_text" ? ft : ta;
       const list = map.get(d.record_id) ?? [];
@@ -305,7 +332,13 @@ export default function RecordsClient({
       const df = decisionFilter;
       const matches = (r: RecordRow): boolean => {
         if (df.kind === "undecided") return (ta.get(r.id)?.length ?? 0) === 0;
-        const all2 = [...(ta.get(r.id) ?? []), ...(ft.get(r.id) ?? [])];
+        // Only decisions the current viewer may see participate in
+        // filtering, so a blinded record cannot be flushed out by
+        // filtering on include or exclude.
+        const all2 = [
+          ...visibleOf(r.id, "title_abstract", ta.get(r.id) ?? []),
+          ...visibleOf(r.id, "full_text", ft.get(r.id) ?? []),
+        ];
         const decs =
           df.stage === "any" ? all2 : all2.filter((d) => d.stage === df.stage);
         if (df.kind === "include") {
@@ -337,6 +370,7 @@ export default function RecordsClient({
     setError(null);
     setTaDecs(ta);
     setFtDecs(ft);
+    setResolutions(resMap);
 
     // Snowball provenance for the visible page. The query errors before
     // migration 0010; the panel then simply shows nothing.
@@ -372,6 +406,9 @@ export default function RecordsClient({
     setSnowLinks(linkMap);
     setSeedTitles(titleMap);
     setRows(pageRecords);
+    // project and userId are stable server props; projectId covers the
+    // identity that matters for refetching.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, page, pageSize, search, status, decisionFilter, sourceFilter, sources, originFilter, batches]);
 
   useEffect(() => {
@@ -618,9 +655,18 @@ export default function RecordsClient({
         });
         if (!data || data.length < 1000) break;
       }
+      const sweepRes = await fetchResolutions(supabase, projectId);
+      const sweepReq = requiredFor(project, "title_abstract");
       const taIncluded = new Set(
         [...byRecord.entries()]
-          .filter(([, decs]) => outcomeOf(decs) === "included")
+          .filter(
+            ([id, decs]) =>
+              settledOutcome(
+                decs,
+                sweepRes.get(resKey("title_abstract", id)),
+                sweepReq
+              ) === "included"
+          )
           .map(([id]) => id)
       );
       const needPdf = new Set(
@@ -1031,7 +1077,9 @@ export default function RecordsClient({
     reasons.map((r, i) => [r.id, { code: `E${i + 1}`, label: r.label }])
   );
   const codeById = new Map(inclusionCodes.map((c) => [c.id, c]));
-  const decisionText = (d: ScreeningDecision) => {
+  const decisionText = (
+    d: Pick<ScreeningDecision, "decision" | "reason_id" | "inclusion_code_id">
+  ) => {
     if (d.decision === "include") {
       const code = d.inclusion_code_id
         ? codeById.get(d.inclusion_code_id)
@@ -1447,22 +1495,55 @@ export default function RecordsClient({
           rows.map((r) => {
             const taD = taDecs.get(r.id) ?? [];
             const ftD = ftDecs.get(r.id) ?? [];
+            const taRes = resolutions.get(resKey("title_abstract", r.id));
+            const ftRes = resolutions.get(resKey("full_text", r.id));
+            const taS = stageStatus(
+              taD,
+              taRes,
+              requiredFor(project, "title_abstract")
+            );
+            const ftS = stageStatus(
+              ftD,
+              ftRes,
+              requiredFor(project, "full_text")
+            );
             // The row badge shows the record's most recent designation:
-            // the full text outcome once any full text decision exists,
-            // otherwise the title/abstract outcome.
-            const stageDecs = ftD.length > 0 ? ftD : taD;
-            const stageLabel = ftD.length > 0 ? "Full text" : "Title/abstract";
-            const outcome = outcomeOf(stageDecs);
-            const badgePick =
-              outcome === "included"
-                ? (stageDecs.find(
-                    (d) => d.decision === "include" && d.inclusion_code_id
-                  ) ?? stageDecs.find((d) => d.decision === "include"))
-                : outcome === "excluded"
-                  ? (stageDecs.find(
-                      (d) => d.decision === "exclude" && d.reason_id
-                    ) ?? stageDecs.find((d) => d.decision === "exclude"))
+            // the full text status once any full text decision or
+            // resolution exists, otherwise the title/abstract status.
+            const useFt = ftD.length > 0 || Boolean(ftRes);
+            const stageS = useFt ? ftS : taS;
+            const stageRes = useFt ? ftRes : taRes;
+            const stageDecs = useFt ? ftD : taD;
+            const stageLabel = useFt ? "Full text" : "Title/abstract";
+            const outcome = stageS.kind;
+            // What the badge cites: the resolution when one settled the
+            // stage, else the most informative matching opinion.
+            type BadgeSrc = Pick<
+              ScreeningDecision,
+              "decision" | "reason_id" | "inclusion_code_id"
+            >;
+            const badgePick: BadgeSrc | null =
+              stageS.kind === "included"
+                ? stageRes && stageRes.decision === "include"
+                  ? stageRes
+                  : (stageDecs.find(
+                      (d) => d.decision === "include" && d.inclusion_code_id
+                    ) ?? stageDecs.find((d) => d.decision === "include") ?? null)
+                : stageS.kind === "excluded"
+                  ? stageRes && stageRes.decision === "exclude"
+                    ? stageRes
+                    : (stageDecs.find(
+                        (d) => d.decision === "exclude" && d.reason_id
+                      ) ?? stageDecs.find((d) => d.decision === "exclude") ?? null)
                   : null;
+            const visTaD = taD.filter(
+              (d) =>
+                taS.kind !== "awaiting" || d.decided_by === userId
+            );
+            const visFtD = ftD.filter(
+              (d) =>
+                ftS.kind !== "awaiting" || d.decided_by === userId
+            );
             const decLine = (list: ScreeningDecision[]) =>
               list
                 .map((d) => {
@@ -1521,9 +1602,17 @@ export default function RecordsClient({
                   {outcome === "conflict" && (
                     <span
                       className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200"
-                      title={`${stageLabel}: reviewers disagree`}
+                      title={`${stageLabel}: reviewers disagree; settle it in the screening room's review mode`}
                     >
                       conflict
+                    </span>
+                  )}
+                  {stageS.kind === "awaiting" && (
+                    <span
+                      className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                      title={`${stageLabel}: independent screening; decisions stay hidden until ${stageS.need} opinions are in`}
+                    >
+                      opinions {stageS.have}/{stageS.need}
                     </span>
                   )}
                   {badgePick && (
@@ -1563,19 +1652,34 @@ export default function RecordsClient({
                         {r.abstract}
                       </p>
                     )}
-                    {(taD.length > 0 || ftD.length > 0) && (
+                    {(visTaD.length > 0 ||
+                      visFtD.length > 0 ||
+                      taS.kind === "awaiting" ||
+                      ftS.kind === "awaiting") && (
                       <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
-                        {taD.length > 0 && (
-                          <>Title/abstract: {decLine(taD)}</>
+                        {(visTaD.length > 0 || taS.kind === "awaiting") && (
+                          <>
+                            Title/abstract: {decLine(visTaD)}
+                            {taS.kind === "awaiting" &&
+                              `${visTaD.length > 0 ? " · " : ""}other opinions hidden until ${taS.need} are in`}
+                          </>
                         )}
-                        {taD.length > 0 && ftD.length > 0 && " · "}
-                        {ftD.length > 0 && <>Full text: {decLine(ftD)}</>}
+                        {(visTaD.length > 0 || taS.kind === "awaiting") &&
+                          (visFtD.length > 0 || ftS.kind === "awaiting") &&
+                          " · "}
+                        {(visFtD.length > 0 || ftS.kind === "awaiting") && (
+                          <>
+                            Full text: {decLine(visFtD)}
+                            {ftS.kind === "awaiting" &&
+                              `${visFtD.length > 0 ? " · " : ""}other opinions hidden until ${ftS.need} are in`}
+                          </>
+                        )}
                       </p>
                     )}
                     {r.status === "active" && (
                       <div className="mb-3 flex flex-col gap-2 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-950">
                         {decisionRow(r, "title_abstract")}
-                        {outcomeOf(taDecs.get(r.id) ?? []) === "included" && (
+                        {taS.kind === "included" && (
                           <>
                             {decisionRow(r, "full_text")}
                             <button

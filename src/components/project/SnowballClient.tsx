@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
-import { outcomeOf } from "@/lib/outcomes";
+import { requiredFor, settledOutcome } from "@/lib/outcomes";
+import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { authorTokens, normalizeDoi, normalizeTitle, sharesAuthor } from "@/lib/normalize";
 import { parseRis } from "@/lib/ris";
 import { parseBibtex } from "@/lib/bibtex";
@@ -19,7 +20,7 @@ import {
   type OaWork,
 } from "@/lib/openalex";
 import { findMissingAbstracts, plausibleAbstract } from "@/lib/abstracts";
-import type { ParsedRef, RecordRow } from "@/lib/types";
+import type { ParsedRef, Project, RecordRow } from "@/lib/types";
 
 type Direction = "backward" | "forward";
 
@@ -42,12 +43,13 @@ type CorpusKey = {
 };
 
 export default function SnowballClient({
-  projectId,
+  project,
   userId,
 }: {
-  projectId: string;
+  project: Project;
   userId: string;
 }) {
+  const projectId = project.id;
   const [seeds, setSeeds] = useState<RecordRow[] | null>(null);
   const [selectedSeeds, setSelectedSeeds] = useState<Set<string>>(new Set());
   const [dirBack, setDirBack] = useState(true);
@@ -106,14 +108,32 @@ export default function SnowballClient({
     try {
       const taByRecord = await byStage("title_abstract");
       const ftByRecord = await byStage("full_text");
+      // Seeds must be SETTLED includes at both stages (quota reached
+      // or conflict resolved), never records still under blind review.
+      const resMap = await fetchResolutions(supabase, projectId);
+      const taReq = requiredFor(project, "title_abstract");
+      const ftReq = requiredFor(project, "full_text");
       const taIncluded = new Set(
         [...taByRecord.entries()]
-          .filter(([, decs]) => outcomeOf(decs) === "included")
+          .filter(
+            ([id, decs]) =>
+              settledOutcome(
+                decs,
+                resMap.get(resKey("title_abstract", id)),
+                taReq
+              ) === "included"
+          )
           .map(([id]) => id)
       );
       includeIds = [...ftByRecord.entries()]
         .filter(
-          ([id, decs]) => taIncluded.has(id) && outcomeOf(decs) === "included"
+          ([id, decs]) =>
+            taIncluded.has(id) &&
+            settledOutcome(
+              decs,
+              resMap.get(resKey("full_text", id)),
+              ftReq
+            ) === "included"
         )
         .map(([id]) => id);
     } catch (e) {
@@ -146,7 +166,7 @@ export default function SnowballClient({
     }
     setCorpus(keys);
     setError(null);
-  }, [projectId]);
+  }, [projectId, project]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
