@@ -326,19 +326,30 @@ export async function POST(request: Request) {
     });
   }
 
-  // Existing quotes on this record (excerpts + any prior suggestions)
-  // so re-runs and AI/human overlap never duplicate.
+  // Deduplication is PAIR level (quote + concept), deliberately not
+  // quote level: a quote rejected under the wrong concept must stay
+  // free to return under a different one, and only an exact repeat of
+  // the same evidence for the same concept is noise. Reviewing what
+  // re-runs resurface is the researcher's job, not ours.
+  const pairKey = (
+    quote: string,
+    conceptId: string | null,
+    label: string
+  ): string =>
+    `${conceptId ?? `label:${label.trim().toLowerCase()}`} ${normQuote(quote)}`;
   const seen = new Set<string>();
   const { data: exRows } = await supabase
     .from("concept_excerpts")
-    .select("quote")
+    .select("quote, concept_id")
     .eq("record_id", recordId);
-  (exRows ?? []).forEach((r) => seen.add(normQuote(r.quote)));
+  (exRows ?? []).forEach((r) => seen.add(pairKey(r.quote, r.concept_id, "")));
   const { data: sugRows } = await supabase
     .from("concept_suggestions")
-    .select("quote")
+    .select("quote, concept_id, concept_label")
     .eq("record_id", recordId);
-  (sugRows ?? []).forEach((r) => seen.add(normQuote(r.quote)));
+  (sugRows ?? []).forEach((r) =>
+    seen.add(pairKey(r.quote, r.concept_id, r.concept_label ?? ""))
+  );
 
   const byLabel = new Map(
     concepts.map((c) => [c.label.trim().toLowerCase(), c.id])
@@ -382,7 +393,7 @@ export async function POST(request: Request) {
         droppedUnverified++;
         continue;
       }
-      const key = normQuote(anchor.quote);
+      const key = pairKey(anchor.quote, finalConceptId, label);
       if (seen.has(key)) {
         droppedDuplicate++;
         continue;
@@ -417,8 +428,19 @@ export async function POST(request: Request) {
     }
   }
 
+  // Distinct concepts this run actually surfaced, split by whether
+  // they matched the vocabulary or propose something new.
+  const matchedIds = new Set<string>();
+  const newLabels = new Set<string>();
+  for (const r of rows) {
+    if (r.concept_id) matchedIds.add(String(r.concept_id));
+    else newLabels.add(String(r.concept_label).trim().toLowerCase());
+  }
+
   return NextResponse.json({
     suggested: rows.length,
+    matchedConcepts: matchedIds.size,
+    newConcepts: newLabels.size,
     droppedUnverified,
     droppedDuplicate,
     droppedBadLabel,

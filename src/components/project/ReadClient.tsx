@@ -1506,6 +1506,11 @@ export default function ReadClient({
         );
       } else {
         const bits = [`${data.suggested} suggestion(s) to review`];
+        if (data.suggested > 0 && typeof data.matchedConcepts === "number") {
+          bits.push(
+            `${data.matchedConcepts} existing concept(s) matched, ${data.newConcepts} new proposed`
+          );
+        }
         if (data.droppedUnverified > 0) {
           bits.push(`${data.droppedUnverified} dropped as unverifiable`);
         }

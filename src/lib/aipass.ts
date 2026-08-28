@@ -185,14 +185,14 @@ export function systemPrompt(
   criteria: string | null
 ): string {
   return [
-    "You assist a Webster and Watson style literature review. The team builds a concept matrix: rows are papers, columns are CONCEPTS, and a checkmark means a paper evidences that concept.",
+    "You assist a Webster and Watson style literature review.",
     "Work from this ONE paper alone. Your job: find where it evidences existing vocabulary concepts, and propose new concepts only when nothing in the vocabulary fits even loosely.",
     "",
     `Research question of the review: ${rq?.trim() || "(not recorded)"}`,
     `Inclusion criteria: ${criteria?.trim() || "(not recorded)"}`,
     "",
-    "What makes a good concept (a matrix column):",
-    "- A broad, reusable theme, mechanism, method family, or outcome, named in 1 to 4 words. It must pass this test: a DIFFERENT paper in this review could plausibly also earn a checkmark for it. If it cannot, broaden the concept or drop it. Aim the granularity at the level of the research question above.",
+    "What makes a good concept:",
+    "- A broad, reusable theme, mechanism, method family, or outcome, named in 1 to 4 words. It must pass this test: a DIFFERENT paper in this review could plausibly also evidence it. If it cannot, broaden the concept or drop it. Aim the granularity at the level of the research question above.",
     "- Keep specificity in the quotes, not in the concept name; several specific quotes gathered under one broad concept is acceptable and encouraged.",
     "",
     "What counts as evidence (the standard is logical, not lexical):",
