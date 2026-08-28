@@ -62,6 +62,20 @@ const AI_MODELS = [
     outPerMTok: 25,
   },
   {
+    id: "claude-fable-5",
+    label: "Claude Fable 5",
+    provider: "anthropic",
+    inPerMTok: 10,
+    outPerMTok: 50,
+  },
+  {
+    id: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    provider: "openai",
+    inPerMTok: 5,
+    outPerMTok: 30,
+  },
+  {
     id: "gpt-5.6-terra",
     label: "GPT-5.6 Terra",
     provider: "openai",
@@ -1396,11 +1410,27 @@ export default function ReadClient({
   function saveKey() {
     const k = keyDraft.trim();
     if (!k) return;
+    // Route by the key itself: sk-ant-* is Anthropic, anything else is
+    // OpenAI. A key pasted while the other provider's model is selected
+    // still lands in the right slot instead of being sent to the wrong
+    // provider.
+    const target: "anthropic" | "openai" = k.startsWith("sk-ant-")
+      ? "anthropic"
+      : "openai";
     try {
-      localStorage.setItem(keyStoreFor(providerOf(aiModel)), k);
-      setHasKey(true);
-      setEditingKey(false);
+      localStorage.setItem(keyStoreFor(target), k);
       setKeyDraft("");
+      if (target === providerOf(aiModel)) {
+        setHasKey(true);
+        setEditingKey(false);
+      } else {
+        setAiErr(false);
+        setAiMsg(
+          target === "anthropic"
+            ? "That is an Anthropic key, so it was saved for the Claude models; pick one to use it, or paste an OpenAI key for the selected model."
+            : "That is an OpenAI key, so it was saved for the GPT models; pick one to use it, or paste an Anthropic key for the selected model."
+        );
+      }
     } catch {
       setAiMsg("Could not store the key in this browser.");
     }
@@ -1885,11 +1915,7 @@ export default function ReadClient({
               {editingKey || !hasKey ? (
                 <div className="flex flex-col gap-1.5">
                   <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    Paste your{" "}
-                    {providerOf(aiModel) === "anthropic"
-                      ? "Anthropic"
-                      : "OpenAI"}{" "}
-                    API key.{" "}
+                    Paste your OpenAI/Anthropic API key.{" "}
                     <button
                       type="button"
                       onClick={openKeyInfo}
@@ -1903,11 +1929,7 @@ export default function ReadClient({
                       type="password"
                       value={keyDraft}
                       onChange={(e) => setKeyDraft(e.target.value)}
-                      placeholder={
-                        providerOf(aiModel) === "anthropic"
-                          ? "sk-ant-..."
-                          : "sk-..."
-                      }
+                      placeholder="sk-... or sk-ant-..."
                       className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                     />
                     <button
@@ -2118,14 +2140,13 @@ export default function ReadClient({
                         One pass reads a single paper. Depending on paper
                         length, that is usually around a cent with GPT-5.6
                         Luna, roughly 5 to 15 cents with Claude Sonnet 5 or
-                        GPT-5.6 Terra, and a few tens of cents with Claude
-                        Opus 5. The model picker shows a live estimate for
-                        the paper you have open, based on its real measured
-                        text, and the estimates sharpen automatically after
-                        each run using the exact usage your provider
-                        reports. Response length is capped, so every pass
-                        has a known maximum cost, shown when you hover the
-                        picker. Exact usage shows up in your provider
+                        GPT-5.6 Terra, a few tens of cents with Claude
+                        Opus 5 or GPT-5.6 Sol, and about double that with
+                        Claude Fable 5. The model picker shows a live
+                        estimate for the paper you have open based on its
+                        measured text. Response length is capped, so every
+                        pass has a known maximum cost, shown when you hover
+                        the picker. Exact usage shows up in your provider
                         dashboard.
                       </p>
                     </section>
