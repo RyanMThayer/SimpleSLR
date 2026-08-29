@@ -1,5 +1,6 @@
 import type { ProjectDatabase, SearchConfig } from "./types";
 import { generateQuery, hydrateConfig } from "./searchQuery";
+import { AI_MODELS } from "./aiModels";
 
 /**
  * Builds the written PRISMA 2020 summary shown under the flow diagram:
@@ -50,7 +51,23 @@ export type SummaryInput = {
   memberCount: number;
   /** Preformatted date for the work-in-progress note, e.g. "August 24, 2026". */
   asOf: string;
+  /** Opinions required per record at each stage (1 = single screening). */
+  requiredTa?: number;
+  requiredFt?: number;
+  /** Conflict resolutions recorded (drives the disagreements clause). */
+  resolutionsCount?: number;
+  /** Model ids used by the AI prescreen, when it removed anything. */
+  prescreenModels?: string[];
 };
+
+/** Sentence-initial small numbers as words, per manuscript convention. */
+function numWord(n: number): string {
+  return ["zero", "one", "two", "three"][n] ?? String(n);
+}
+
+function modelLabel(id: string): string {
+  return AI_MODELS.find((m) => m.id === id)?.label ?? id;
+}
 
 const MONTHS = [
   "January",
@@ -206,7 +223,7 @@ export function buildPrismaSummary(input: SummaryInput): string[] {
     );
     if (a.autoExcluded > 0) {
       p2.push(
-        `Before screening, ${plural(a.autoExcluded, "record")} ${wasWere(a.autoExcluded)} marked as ineligible by an automation tool (SimpleSLR's AI prescreen, which removes a record only when every vote of a multi-prompt model ensemble independently judges it clearly outside the eligibility criteria).`
+        `Before screening, ${plural(a.autoExcluded, "record")} ${wasWere(a.autoExcluded)} removed as ineligible by an automation tool.`
       );
     }
     if (a.duplicates > 0) {
@@ -248,6 +265,11 @@ export function buildPrismaSummary(input: SummaryInput): string[] {
         `Of these, ${plural(o.duplicates, "duplicate")} ${wasWere(o.duplicates)} removed.`
       );
     }
+    if (o.autoExcluded > 0) {
+      p3.push(
+        `A further ${plural(o.autoExcluded, "record")} ${wasWere(o.autoExcluded)} removed as ineligible by the automation tool.`
+      );
+    }
     p3.push(
       `These records went through the same two stage screening: ${o.taExcluded} ${wasWere(o.taExcluded)} excluded on title and abstract, full texts were sought for ${plural(o.sought, "report")} (${o.notRetrieved} not retrieved), and of the ${plural(o.assessed, "report")} assessed, ${o.ftExcluded} ${wasWere(o.ftExcluded)} excluded${
         o.ftExcluded > 0 && o.ftExcludedByReason.length > 0
@@ -263,11 +285,48 @@ export function buildPrismaSummary(input: SummaryInput): string[] {
 
   // ------------------------------------------------------------------
   // Paragraph 4: process, totals, and the work-in-progress note.
+  //
+  // Settings driven and reported by exception: only what the team
+  // actually used appears. Defaults (single screening, no automation)
+  // produce no sentence, because absence is the reader's assumption
+  // and negative disclosures add length without information.
   // ------------------------------------------------------------------
   const p4: string[] = [];
   p4.push(
-    `Screening at both stages was performed in SimpleSLR by the ${plural(input.memberCount, "member")} of the review team, without any automation or AI assistance in the screening decisions.`
+    `Screening at both stages was conducted in SimpleSLR by ${
+      input.memberCount > 1
+        ? `the ${plural(input.memberCount, "member")} of the review team`
+        : "a single reviewer"
+    }.`
   );
+  const kTa = input.requiredTa ?? 1;
+  const kFt = input.requiredFt ?? 1;
+  if (kTa > 1 || kFt > 1) {
+    const coverage =
+      kTa === kFt
+        ? `${numWord(kTa)} reviewers independently assessed each record at both stages`
+        : kTa > 1 && kFt > 1
+          ? `${numWord(kTa)} reviewers independently assessed each record at the title and abstract stage and ${numWord(kFt)} at full text`
+          : kTa > 1
+            ? `${numWord(kTa)} reviewers independently assessed each record at the title and abstract stage`
+            : `${numWord(kFt)} reviewers independently assessed each record at the full text stage`;
+    const sentence = `${coverage.charAt(0).toUpperCase()}${coverage.slice(1)}, with individual decisions concealed until each record had received its required number of assessments${
+      (input.resolutionsCount ?? 0) > 0
+        ? "; disagreements were resolved by discussion within the team"
+        : ""
+    }.`;
+    p4.push(sentence);
+  }
+  const totalAuto = a.autoExcluded + o.autoExcluded;
+  if (totalAuto > 0) {
+    const models =
+      (input.prescreenModels ?? []).length > 0
+        ? listJoin((input.prescreenModels ?? []).map(modelLabel))
+        : "large language models";
+    p4.push(
+      `The ${plural(totalAuto, "record")} removed before screening ${wasWere(totalAuto)} identified by SimpleSLR's automated prescreen, which excludes a record only when independent prompts to ${models} unanimously judge it clearly ineligible under the stated criteria.`
+    );
+  }
   if (o.identified > 0) {
     p4.push(
       `In total, ${plural(c.ftIncluded, "study", "studies")} met all criteria: ${a.ftIncluded} identified through database searching and ${o.ftIncluded} through citation searching.`

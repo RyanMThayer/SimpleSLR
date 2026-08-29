@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { kbd } from "@/lib/ui";
 import { requiredFor, settledOutcome, outcomeOf } from "@/lib/outcomes";
+import PrescreenPanel from "@/components/project/PrescreenPanel";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { cleanQuote } from "@/lib/concepts";
 import {
@@ -1305,6 +1306,17 @@ export default function ScreenClient({
             {label}
           </button>
         ))}
+        {stage === "title_abstract" && !reviewing && (
+          <div className="ml-auto">
+            <PrescreenPanel
+              project={project}
+              onDone={() => {
+                setQueue(null);
+                load();
+              }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="mb-4">

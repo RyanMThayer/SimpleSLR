@@ -32,6 +32,7 @@ type Data = {
   resolutions: Map<string, ScreeningResolution>;
   requiredTa: number;
   requiredFt: number;
+  prescreenModels: string[];
   reasons: ExclusionReason[];
   databases: ProjectDatabase[];
   batches: ImportBatch[];
@@ -757,12 +758,25 @@ export default function PrismaClient({ project }: { project: Project }) {
         if (p) profiles.set(m.user_id, p);
       });
       const resolutions = await fetchResolutions(supabase, project.id);
+      // Models the AI prescreen used, for the written summary's
+      // automation sentence (empty when the prescreen never ran or the
+      // table predates migration 0018).
+      const prescreenModels = new Set<string>();
+      {
+        const { data: ex } = await supabase
+          .from("prescreen_extractions")
+          .select("model")
+          .eq("project_id", project.id)
+          .range(0, 999);
+        (ex ?? []).forEach((r) => prescreenModels.add(r.model));
+      }
       const d: Data = {
         records,
         decisions,
         resolutions,
         requiredTa: requiredFor(project, "title_abstract"),
         requiredFt: requiredFor(project, "full_text"),
+        prescreenModels: [...prescreenModels].sort(),
         reasons,
         databases,
         batches,
@@ -1114,6 +1128,10 @@ export default function PrismaClient({ project }: { project: Project }) {
           counts,
           memberCount: data.profiles.size,
           asOf: formatLongDate(stamp) ?? stamp,
+          requiredTa: data.requiredTa,
+          requiredFt: data.requiredFt,
+          resolutionsCount: data.resolutions.size,
+          prescreenModels: data.prescreenModels,
         })
       : null;
 
