@@ -16,6 +16,7 @@ export type SummaryArm = {
   backward: number;
   forward: number;
   duplicates: number;
+  autoExcluded: number;
   screened: number;
   taExcluded: number;
   sought: number;
@@ -203,6 +204,11 @@ export function buildPrismaSummary(input: SummaryInput): string[] {
     p2.push(
       `The database searches identified ${plural(a.identified, "record")}.`
     );
+    if (a.autoExcluded > 0) {
+      p2.push(
+        `Before screening, ${plural(a.autoExcluded, "record")} ${wasWere(a.autoExcluded)} marked as ineligible by an automation tool (SimpleSLR's AI prescreen, which removes a record only when every vote of a multi-prompt model ensemble independently judges it clearly outside the eligibility criteria).`
+      );
+    }
     if (a.duplicates > 0) {
       p2.push(
         `After removal of ${plural(a.duplicates, "duplicate record")}, ${plural(a.screened, "record")} ${wasWere(a.screened)} screened on title and abstract, and ${a.taExcluded} of them ${wasWere(a.taExcluded)} excluded.`

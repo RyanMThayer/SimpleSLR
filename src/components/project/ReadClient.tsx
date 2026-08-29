@@ -20,6 +20,12 @@ import { buildAnchor, findAnchor, snapToWords } from "@/lib/anchors";
 import { cleanQuote } from "@/lib/concepts";
 import { systemPrompt, vocabBlock } from "@/lib/aipass";
 import {
+  AI_MODELS,
+  keyStoreFor,
+  providerOf,
+  type AiModelId,
+} from "@/lib/aiModels";
+import {
   estimateCost,
   formatCost,
   updateCalib,
@@ -45,64 +51,9 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
  * right rail is this paper's live concept column.
  */
 
-// ----------------------------------------------------------------------
-// AI pass models: the user picks one; the matching provider key is
-// kept per device in localStorage and relayed per request.
-// ----------------------------------------------------------------------
-const AI_MODELS = [
-  // inPerMTok/outPerMTok: provider list prices in USD per million
-  // input/output tokens, used for the per-paper cost preview.
-  {
-    id: "claude-sonnet-5",
-    label: "Claude Sonnet 5",
-    provider: "anthropic",
-    inPerMTok: 2,
-    outPerMTok: 10,
-  },
-  {
-    id: "claude-opus-5",
-    label: "Claude Opus 5",
-    provider: "anthropic",
-    inPerMTok: 5,
-    outPerMTok: 25,
-  },
-  {
-    id: "claude-fable-5",
-    label: "Claude Fable 5",
-    provider: "anthropic",
-    inPerMTok: 10,
-    outPerMTok: 50,
-  },
-  {
-    id: "gpt-5.6-sol",
-    label: "GPT-5.6 Sol",
-    provider: "openai",
-    inPerMTok: 5,
-    outPerMTok: 30,
-  },
-  {
-    id: "gpt-5.6-terra",
-    label: "GPT-5.6 Terra",
-    provider: "openai",
-    inPerMTok: 2,
-    outPerMTok: 12,
-  },
-  {
-    id: "gpt-5.6-luna",
-    label: "GPT-5.6 Luna",
-    provider: "openai",
-    inPerMTok: 0.2,
-    outPerMTok: 1.2,
-  },
-] as const;
-type AiModelId = (typeof AI_MODELS)[number]["id"];
+// AI pass models come from the shared lib (also used by the
+// prescreen); the user's choice is kept per device.
 const MODEL_STORE = "simpleslr-ai-model";
-function keyStoreFor(provider: "anthropic" | "openai"): string {
-  return `simpleslr-${provider}-key`;
-}
-function providerOf(model: AiModelId): "anthropic" | "openai" {
-  return AI_MODELS.find((m) => m.id === model)?.provider ?? "anthropic";
-}
 
 // Cost preview persistence: per-model chars-per-token ratio and
 // average output length, learned from the billed usage of real runs

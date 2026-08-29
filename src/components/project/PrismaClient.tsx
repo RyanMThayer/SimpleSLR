@@ -44,6 +44,7 @@ type ArmCounts = {
   backward: number;
   forward: number;
   duplicates: number;
+  autoExcluded: number;
   screened: number;
   taExcluded: number;
   sought: number;
@@ -91,8 +92,7 @@ async function fetchPaged<T>(
 }
 
 function computeCounts(d: Data): Counts {
-  const active = d.records.filter((r) => r.status === "active");
-  const duplicates = d.records.length - active.length;
+  const duplicates = d.records.filter((r) => r.status === "duplicate").length;
 
   // Batches created before the snowball migration have no origin column;
   // treat those as ordinary database imports.
@@ -110,6 +110,7 @@ function computeCounts(d: Data): Counts {
     backward: 0,
     forward: 0,
     duplicates: 0,
+    autoExcluded: 0,
     screened: 0,
     taExcluded: 0,
     sought: 0,
@@ -137,8 +138,14 @@ function computeCounts(d: Data): Counts {
       if (r.batch_id && backwardBatchIds.has(r.batch_id)) arm.backward++;
       else arm.forward++;
     }
-    if (r.status !== "active") {
+    if (r.status === "duplicate") {
       arm.duplicates++;
+      continue;
+    }
+    if (r.status === "prescreen_excluded") {
+      // PRISMA 2020: "records marked as ineligible by automation
+      // tools", removed before screening.
+      arm.autoExcluded++;
       continue;
     }
     arm.screened++;
@@ -242,7 +249,7 @@ function computeCounts(d: Data): Counts {
     other,
     perSource: [...perSourceMap.entries()].map(([name, v]) => ({ name, ...v })),
     duplicates,
-    screened: active.length,
+    screened: db.screened + other.screened,
     taExcluded,
     taIncluded,
     taConflicts,
@@ -412,6 +419,7 @@ function layoutSingleArm(c: Counts): Diagram {
       mkBox(SIDE_X, SIDE_W, [
         "Records removed before screening:",
         `Duplicate records removed (n = ${c.db.duplicates})`,
+        `Records marked as ineligible by automation tools (n = ${c.db.autoExcluded})`,
       ]),
     ],
     [
@@ -516,6 +524,7 @@ function layoutTwoArms(c: Counts): Diagram {
       mkBox(S1_X, S1_W, [
         "Records removed before screening:",
         `Duplicate records removed (n = ${c.db.duplicates})`,
+        `Records marked as ineligible by automation tools (n = ${c.db.autoExcluded})`,
       ]),
       mkBox(OTH_X, OTH_W, [
         "Records identified from:",

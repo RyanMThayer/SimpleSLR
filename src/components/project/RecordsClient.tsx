@@ -22,6 +22,7 @@ import {
   uploadFulltext,
 } from "@/lib/fulltext";
 import BulkPdfUpload from "@/components/project/BulkPdfUpload";
+import PrescreenPanel from "@/components/project/PrescreenPanel";
 import { useRef } from "react";
 import {
   collectDependents,
@@ -41,7 +42,7 @@ import type {
 
 const PAGE_SIZE = 50;
 
-type StatusFilter = "all" | "active" | "duplicate";
+type StatusFilter = "all" | "active" | "duplicate" | "prescreen_excluded";
 /**
  * Decision filter: top level category, optionally refined to one
  * inclusion code / exclusion reason. The string "any" is the sentinel
@@ -110,6 +111,20 @@ export default function RecordsClient({
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Prescreen vote details, fetched lazily when an AI prescreened
+  // record is expanded (its audit trail, and the basis for restoring).
+  const [prescreenVotes, setPrescreenVotes] = useState<
+    Map<
+      string,
+      {
+        framing: string;
+        model: string;
+        verdict: string;
+        criterion: string | null;
+        note: string | null;
+      }[]
+    >
+  >(new Map());
   const [snowLinks, setSnowLinks] = useState<
     Map<string, { seedId: string; direction: string }[]>
   >(new Map());
@@ -973,6 +988,56 @@ export default function RecordsClient({
     load();
   }
 
+  async function restorePrescreened(r: RecordRow) {
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({ status: "active" })
+      .eq("id", r.id)
+      .eq("status", "prescreen_excluded");
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    loadSources();
+    load();
+  }
+
+  // Lazy load the vote details for an expanded prescreened record.
+  useEffect(() => {
+    const r = rows?.find((x) => x.id === expanded);
+    if (!r || r.status !== "prescreen_excluded" || prescreenVotes.has(r.id)) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("prescreen_votes")
+        .select("framing, model, verdict, criterion, note")
+        .eq("record_id", r.id)
+        .order("created_at");
+      if (cancelled) return;
+      setPrescreenVotes((m) => {
+        const next = new Map(m);
+        next.set(
+          r.id,
+          (data ?? []) as {
+            framing: string;
+            model: string;
+            verdict: string;
+            criterion: string | null;
+            note: string | null;
+          }[]
+        );
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, rows, prescreenVotes]);
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const applyFilter = (f: DecisionFilter, close: boolean) => {
@@ -1231,6 +1296,7 @@ export default function RecordsClient({
         >
           <option value="active">Active</option>
           <option value="duplicate">Duplicates</option>
+          <option value="prescreen_excluded">Prescreened out</option>
           <option value="all">All statuses</option>
         </select>
         <select
@@ -1458,6 +1524,13 @@ export default function RecordsClient({
             load();
           }}
         />
+        <PrescreenPanel
+          project={project}
+          onDone={() => {
+            loadSources();
+            load();
+          }}
+        />
         <div className="ml-auto flex items-center gap-3">
           <span className="text-sm tabular-nums text-zinc-600 dark:text-zinc-300">
             {total === 0
@@ -1587,6 +1660,14 @@ export default function RecordsClient({
                   {r.status === "duplicate" && (
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                       duplicate
+                    </span>
+                  )}
+                  {r.status === "prescreen_excluded" && (
+                    <span
+                      className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                      title="Removed before screening by the AI prescreen (unanimous votes); open the record to see the votes or restore it"
+                    >
+                      AI prescreened
                     </span>
                   )}
                   {r.retrieval_status === "not_retrieved" && (
@@ -1730,6 +1811,33 @@ export default function RecordsClient({
                         </div>
                       </div>
                     )}
+                    {r.status === "prescreen_excluded" && (
+                      <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-200">
+                        <p className="mb-1.5 font-medium">
+                          Removed before screening by the AI prescreen
+                          (every vote said exclude):
+                        </p>
+                        {prescreenVotes.get(r.id) ? (
+                          <ul className="mb-2 flex flex-col gap-0.5">
+                            {(prescreenVotes.get(r.id) ?? []).map((v, i) => (
+                              <li key={i}>
+                                {v.framing} · {v.model}: {v.verdict}
+                                {v.criterion ? ` ("${v.criterion}")` : ""}
+                                {v.note ? ` · ${v.note}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mb-2">Loading votes...</p>
+                        )}
+                        <button
+                          onClick={() => restorePrescreened(r)}
+                          className="rounded-full border border-violet-400 px-3 py-1 text-xs font-medium transition-colors hover:bg-violet-100 dark:border-violet-700 dark:hover:bg-violet-900"
+                        >
+                          Restore to screening
+                        </button>
+                      </div>
+                    )}
                     <div className="flex gap-4">
                       <button
                         onClick={() => startEdit(r)}
@@ -1737,12 +1845,14 @@ export default function RecordsClient({
                       >
                         Edit
                       </button>
-                      <button
-                        onClick={() => toggleDuplicate(r)}
-                        className={`${linkBtn} text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200`}
-                      >
-                        {r.status === "duplicate" ? "Mark as unique" : "Mark as duplicate"}
-                      </button>
+                      {r.status !== "prescreen_excluded" && (
+                        <button
+                          onClick={() => toggleDuplicate(r)}
+                          className={`${linkBtn} text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200`}
+                        >
+                          {r.status === "duplicate" ? "Mark as unique" : "Mark as duplicate"}
+                        </button>
+                      )}
                       <button
                         onClick={() => deleteRecord(r)}
                         className={`${linkBtn} text-zinc-500 dark:text-zinc-400 hover:text-red-600`}

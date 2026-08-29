@@ -110,7 +110,7 @@ export type RecordRow = {
   doi: string | null;
   url: string | null;
   source_label: string | null;
-  status: "active" | "duplicate";
+  status: "active" | "duplicate" | "prescreen_excluded";
   duplicate_of: string | null;
   assigned_to: string | null;
   ft_assigned_to: string | null;
