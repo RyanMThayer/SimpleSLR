@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import ApiKeysCard from "@/components/project/ApiKeysCard";
 import { mergeKeywords, seedKeywords } from "@/lib/keywordSeed";
 import type { Project, SearchConfig } from "@/lib/types";
 
@@ -268,6 +269,8 @@ export default function SettingsClient({ project }: { project: Project }) {
           </span>
         )}
       </div>
+
+      <ApiKeysCard />
 
       {error && (
         <p className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">

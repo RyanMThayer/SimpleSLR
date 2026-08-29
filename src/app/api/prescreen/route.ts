@@ -167,17 +167,28 @@ export async function POST(req: Request) {
   }
   const { data: proj } = await supabase
     .from("projects")
-    .select("research_question, inclusion_criteria, exclusion_criteria")
+    .select("research_question, inclusion_criteria")
     .eq("id", projectId)
     .single();
+  // The exclusion criteria ARE the exclusion reasons list: the same
+  // E1..En the humans exclude with, so a vote's cited criterion is
+  // verifiable against the exact list the team uses.
+  const { data: reasonRows } = await supabase
+    .from("exclusion_reasons")
+    .select("label")
+    .eq("project_id", projectId)
+    .order("position");
+  const exclusionText = (reasonRows ?? [])
+    .map((r) => `- ${r.label}`)
+    .join("\n");
   if (
     !proj?.research_question?.trim() ||
     !proj?.inclusion_criteria?.trim() ||
-    !proj?.exclusion_criteria?.trim()
+    !exclusionText
   ) {
     return NextResponse.json({
       error:
-        "The prescreen needs the research question and the inclusion AND exclusion criteria recorded before it can judge anything.",
+        "The prescreen needs the research question, the inclusion criteria, and at least one exclusion reason recorded before it can judge anything.",
     });
   }
 
@@ -193,11 +204,11 @@ export async function POST(req: Request) {
   // proceedings front matter is often title-only); the decision
   // standard confines title-only judgments to unmistakable cases.
 
-  const criteriaText = `${proj.inclusion_criteria}\n${proj.exclusion_criteria}`;
+  const criteriaText = `${proj.inclusion_criteria}\n${exclusionText}`;
   const cHash = criteriaHash(
     proj.research_question,
     proj.inclusion_criteria,
-    proj.exclusion_criteria
+    exclusionText
   );
   const expected: { framing: Framing; model: string; key: string }[] = [
     ...FRAMINGS.map((f) => ({ f, m: model, k: apiKey })),
@@ -278,7 +289,7 @@ export async function POST(req: Request) {
             slot.framing,
             proj.research_question,
             proj.inclusion_criteria,
-            proj.exclusion_criteria
+            exclusionText
           ),
           voteUserPrompt(
             rec.title,

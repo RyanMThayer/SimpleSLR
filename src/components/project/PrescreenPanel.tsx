@@ -48,7 +48,11 @@ export default function PrescreenPanel({
   // fetches them fresh and forces entry here if any are missing.
   const [rqText, setRqText] = useState("");
   const [incText, setIncText] = useState("");
-  const [excText, setExcText] = useState("");
+  // Exclusion criteria ARE the exclusion reasons list (the E1..En the
+  // team excludes with), so the gate checks the list, not a text box.
+  const [reasonLabels, setReasonLabels] = useState<string[]>([]);
+  const [newReason, setNewReason] = useState("");
+  const [addingReason, setAddingReason] = useState(false);
   const [setupLoaded, setSetupLoaded] = useState(false);
   const [savingSetup, setSavingSetup] = useState(false);
   const [setupSaved, setSetupSaved] = useState(false);
@@ -56,7 +60,7 @@ export default function PrescreenPanel({
     setupLoaded &&
     rqText.trim().length > 0 &&
     incText.trim().length > 0 &&
-    excText.trim().length > 0;
+    reasonLabels.length > 0;
   const needsSetup = setupLoaded && (!ready || !setupSaved);
 
   useEffect(() => {
@@ -64,20 +68,28 @@ export default function PrescreenPanel({
     let cancelled = false;
     (async () => {
       const supabase = createClient();
-      const { data } = await supabase
-        .from("projects")
-        .select("research_question, inclusion_criteria, exclusion_criteria")
-        .eq("id", project.id)
-        .single();
+      const [{ data }, { data: reasonRows }] = await Promise.all([
+        supabase
+          .from("projects")
+          .select("research_question, inclusion_criteria")
+          .eq("id", project.id)
+          .single(),
+        supabase
+          .from("exclusion_reasons")
+          .select("label")
+          .eq("project_id", project.id)
+          .order("position"),
+      ]);
       if (cancelled) return;
+      const labels = (reasonRows ?? []).map((r) => r.label as string);
       setRqText(data?.research_question ?? "");
       setIncText(data?.inclusion_criteria ?? "");
-      setExcText(data?.exclusion_criteria ?? "");
+      setReasonLabels(labels);
       setSetupSaved(
         Boolean(
           data?.research_question?.trim() &&
             data?.inclusion_criteria?.trim() &&
-            data?.exclusion_criteria?.trim()
+            labels.length > 0
         )
       );
       setSetupLoaded(true);
@@ -86,6 +98,26 @@ export default function PrescreenPanel({
       cancelled = true;
     };
   }, [open, project.id]);
+
+  async function addReason() {
+    const label = newReason.trim();
+    if (!label || addingReason) return;
+    setAddingReason(true);
+    setError(null);
+    const supabase = createClient();
+    const { error: insErr } = await supabase.from("exclusion_reasons").insert({
+      project_id: project.id,
+      label,
+      position: reasonLabels.length,
+    });
+    setAddingReason(false);
+    if (insErr) {
+      setError(insErr.message);
+      return;
+    }
+    setReasonLabels((l) => [...l, label]);
+    setNewReason("");
+  }
 
   async function saveSetup() {
     if (!ready || savingSetup) return;
@@ -97,7 +129,6 @@ export default function PrescreenPanel({
       .update({
         research_question: rqText.trim(),
         inclusion_criteria: incText.trim(),
-        exclusion_criteria: excText.trim(),
       })
       .eq("id", project.id);
     setSavingSetup(false);
@@ -195,7 +226,7 @@ export default function PrescreenPanel({
     }
     if (!apiKey) {
       setError(
-        `No ${providerOf(model) === "anthropic" ? "Anthropic" : "OpenAI"} API key is saved in this browser; add one in the reading room's AI card first.`
+        `No ${providerOf(model) === "anthropic" ? "Anthropic" : "OpenAI"} API key is saved in this browser; add one under Project settings.`
       );
       return;
     }
@@ -312,8 +343,9 @@ export default function PrescreenPanel({
             role="dialog"
             aria-label="AI prescreen"
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[85vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 text-left dark:border-zinc-800 dark:bg-zinc-900"
+            className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-left dark:border-zinc-800 dark:bg-zinc-900"
           >
+            <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 AI prescreen
@@ -358,7 +390,7 @@ export default function PrescreenPanel({
                   <textarea
                     value={rqText}
                     onChange={(e) => setRqText(e.target.value)}
-                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                    className="min-h-28 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
@@ -366,17 +398,44 @@ export default function PrescreenPanel({
                   <textarea
                     value={incText}
                     onChange={(e) => setIncText(e.target.value)}
-                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                    className="min-h-24 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
-                  Exclusion criteria
-                  <textarea
-                    value={excText}
-                    onChange={(e) => setExcText(e.target.value)}
-                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
-                  />
-                </label>
+                <div className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+                  Exclusion criteria (the exclusion reasons list)
+                  {reasonLabels.length > 0 ? (
+                    <ul className="text-sm font-normal text-zinc-800 dark:text-zinc-200">
+                      {reasonLabels.map((l, i) => (
+                        <li key={i}>
+                          E{i + 1}: {l}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm font-normal">
+                      None yet. Add at least one; these are the same E1 to
+                      En reasons the team excludes with while screening.
+                    </p>
+                  )}
+                  <div className="flex gap-1.5">
+                    <input
+                      value={newReason}
+                      onChange={(e) => setNewReason(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") addReason();
+                      }}
+                      placeholder="Add an exclusion reason"
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-2 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                    />
+                    <button
+                      onClick={addReason}
+                      disabled={addingReason || !newReason.trim()}
+                      className="rounded-full border border-amber-400 px-3 text-sm font-normal transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:hover:bg-amber-900"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
                 <button
                   onClick={saveSetup}
                   disabled={!ready || savingSetup}
@@ -413,7 +472,7 @@ export default function PrescreenPanel({
             {!hasKey && (
               <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
                 No API key for this model&apos;s provider is saved in this
-                browser. Add one in the reading room&apos;s AI card first.
+                browser. Add one under Project settings.
               </p>
             )}
 
@@ -473,6 +532,7 @@ export default function PrescreenPanel({
                 {error}
               </p>
             )}
+            </div>
           </div>
         </div>
       )}

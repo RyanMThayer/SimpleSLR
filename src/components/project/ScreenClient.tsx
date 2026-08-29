@@ -272,7 +272,6 @@ export default function ScreenClient({
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [criteriaEditing, setCriteriaEditing] = useState(false);
   const [incText, setIncText] = useState(project.inclusion_criteria ?? "");
-  const [excText, setExcText] = useState(project.exclusion_criteria ?? "");
   const [savingCriteria, setSavingCriteria] = useState(false);
 
   // Reason management
@@ -913,7 +912,6 @@ export default function ScreenClient({
       .from("projects")
       .update({
         inclusion_criteria: incText.trim() || null,
-        exclusion_criteria: excText.trim() || null,
       })
       .eq("id", project.id);
     setSavingCriteria(false);
@@ -1264,7 +1262,7 @@ export default function ScreenClient({
   const keyInputCls =
     "h-8 w-12 shrink-0 rounded-lg border border-zinc-300 bg-white py-0 text-center text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
-  const hasCriteria = Boolean(incText.trim() || excText.trim());
+  const hasCriteria = Boolean(incText.trim() || reasons.length > 0);
 
   return (
     <main
@@ -1829,14 +1827,11 @@ export default function ScreenClient({
                         onChange={(e) => setIncText(e.target.value)}
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                      Exclusion criteria
-                      <textarea
-                        className={`${inputCls} min-h-20`}
-                        value={excText}
-                        onChange={(e) => setExcText(e.target.value)}
-                      />
-                    </label>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      The exclusion criteria ARE the exclusion reasons list
+                      (E1 to E{Math.max(1, reasons.length)}); edit them
+                      under Manage reasons below the exclude buttons.
+                    </p>
                     <div className="flex gap-3">
                       <button
                         onClick={saveCriteria}
@@ -1867,14 +1862,18 @@ export default function ScreenClient({
                             </p>
                           </div>
                         )}
-                        {excText.trim() && (
+                        {reasons.length > 0 && (
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-red-600">
                               Exclude when
                             </p>
-                            <p className="whitespace-pre-line text-zinc-700 dark:text-zinc-300">
-                              {excText}
-                            </p>
+                            <ul className="text-zinc-700 dark:text-zinc-300">
+                              {reasons.map((rr, i) => (
+                                <li key={rr.id}>
+                                  E{i + 1}: {rr.label}
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
                       </div>

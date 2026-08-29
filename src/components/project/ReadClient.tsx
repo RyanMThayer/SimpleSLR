@@ -562,9 +562,7 @@ export default function ReadClient({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [aiErr, setAiErr] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  const [editingKey, setEditingKey] = useState(false);
   // The "about your API key" panel, plus which providers currently have
   // a key in this browser (read fresh each time the panel opens).
   const [keyInfoOpen, setKeyInfoOpen] = useState(false);
@@ -1378,35 +1376,6 @@ export default function ReadClient({
   // ------------------------------------------------------------------
   // AI pass
   // ------------------------------------------------------------------
-  function saveKey() {
-    const k = keyDraft.trim();
-    if (!k) return;
-    // Route by the key itself: sk-ant-* is Anthropic, anything else is
-    // OpenAI. A key pasted while the other provider's model is selected
-    // still lands in the right slot instead of being sent to the wrong
-    // provider.
-    const target: "anthropic" | "openai" = k.startsWith("sk-ant-")
-      ? "anthropic"
-      : "openai";
-    try {
-      localStorage.setItem(keyStoreFor(target), k);
-      setKeyDraft("");
-      if (target === providerOf(aiModel)) {
-        setHasKey(true);
-        setEditingKey(false);
-      } else {
-        setAiErr(false);
-        setAiMsg(
-          target === "anthropic"
-            ? "That is an Anthropic key, so it was saved for the Claude models; pick one to use it, or paste an OpenAI key for the selected model."
-            : "That is an OpenAI key, so it was saved for the GPT models; pick one to use it, or paste an Anthropic key for the selected model."
-        );
-      }
-    } catch {
-      setAiMsg("Could not store the key in this browser.");
-    }
-  }
-
   function chooseModel(id: AiModelId) {
     setAiModel(id);
     try {
@@ -1437,8 +1406,6 @@ export default function ReadClient({
     setStoredKeys((s) => ({ ...s, [provider]: false }));
     if (provider === providerOf(aiModel)) {
       setHasKey(false);
-      setEditingKey(false);
-      setKeyDraft("");
     }
   }
 
@@ -1451,7 +1418,9 @@ export default function ReadClient({
       /* handled below */
     }
     if (!key) {
-      setEditingKey(true);
+      setHasKey(false);
+      setAiErr(true);
+      setAiMsg("No API key for this model's provider; add one under Project settings.");
       return;
     }
     setAiBusy(true);
@@ -1888,35 +1857,28 @@ export default function ReadClient({
                   </option>
                 ))}
               </select>
-              {editingKey || !hasKey ? (
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    Paste your OpenAI/Anthropic API key.{" "}
-                    <button
-                      type="button"
-                      onClick={openKeyInfo}
-                      className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
-                    >
-                      How your key is handled, and how to get one
-                    </button>
-                  </p>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="password"
-                      value={keyDraft}
-                      onChange={(e) => setKeyDraft(e.target.value)}
-                      placeholder="sk-... or sk-ant-..."
-                      className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                    />
-                    <button
-                      onClick={saveKey}
-                      disabled={!keyDraft.trim()}
-                      className="rounded-full border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
+              {!hasKey ? (
+                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                  No{" "}
+                  {providerOf(aiModel) === "anthropic"
+                    ? "Anthropic"
+                    : "OpenAI"}{" "}
+                  API key in this browser yet. Add one under{" "}
+                  <Link
+                    href={`/projects/${project.id}/settings`}
+                    className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+                  >
+                    Project settings
+                  </Link>
+                  .{" "}
+                  <button
+                    type="button"
+                    onClick={openKeyInfo}
+                    className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+                  >
+                    How your key is handled, and how to get one
+                  </button>
+                </p>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -1927,12 +1889,12 @@ export default function ReadClient({
                   >
                     {aiBusy ? "Reading..." : "Suggest concepts for this paper"}
                   </button>
-                  <button
-                    onClick={() => setEditingKey(true)}
+                  <Link
+                    href={`/projects/${project.id}/settings`}
                     className="text-xs text-zinc-500 underline underline-offset-2 dark:text-zinc-400"
                   >
-                    change key
-                  </button>
+                    manage keys
+                  </Link>
                 </div>
               )}
               {!current?.fulltext_path && (
@@ -2026,8 +1988,9 @@ export default function ReadClient({
                   role="dialog"
                   aria-label="About your API key"
                   onClick={(e) => e.stopPropagation()}
-                  className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 text-left shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+                  className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-left shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
                 >
+                  <div className="flex min-h-0 flex-col overflow-y-auto p-6">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                       Your API key
@@ -2157,6 +2120,7 @@ export default function ReadClient({
                         everywhere.
                       </p>
                     </section>
+                  </div>
                   </div>
                 </div>
               </div>
