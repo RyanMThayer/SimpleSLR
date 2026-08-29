@@ -896,36 +896,81 @@ export default function PrismaClient({ project }: { project: Project }) {
     const codeLabel = new Map(
       ((codes ?? []) as { id: string; label: string }[]).map((c) => [c.id, c.label])
     );
-    const rows = data.decisions.map((d) => {
-      const rec = recById.get(d.record_id);
-      const who = data.profiles.get(d.decided_by);
-      return [
-        d.decided_at,
-        d.stage,
-        d.decision,
-        d.reason_id ? (reasonLabel.get(d.reason_id) ?? "") : "",
-        d.inclusion_code_id
-          ? (codeLabel.get(d.inclusion_code_id) ?? "")
-          : "",
-        who?.email ?? who?.display_name ?? d.decided_by,
-        rec?.title ?? "",
-        rec?.doi ?? "",
-      ];
-    });
+    // Deliberately streamlined: one row per screening event, second
+    // precision timestamps, display names over emails, one shared
+    // reason-or-code column, and titles capped at 100 characters (the
+    // DOI identifies the record unambiguously where one exists). A
+    // 200 record dual screened review stays well under 200 KB.
+    const nameOf = (uid: string) => {
+      const p = data.profiles.get(uid);
+      return p?.display_name || p?.email || "member";
+    };
+    const t = (iso: string) =>
+      iso.replace(/\.\d+/, "").replace(/\+00:00$/, "Z");
+    const cap = (s?: string | null) => {
+      const x = s ?? "";
+      return x.length > 100 ? x.slice(0, 97) + "..." : x;
+    };
+    const stageOf = (s: string) =>
+      s === "full_text" ? "full text" : "title/abstract";
+    const detailOf = (
+      decision: string,
+      reasonId: string | null,
+      codeId?: string | null
+    ) =>
+      decision === "exclude"
+        ? reasonId
+          ? (reasonLabel.get(reasonId) ?? "removed reason")
+          : ""
+        : codeId
+          ? (codeLabel.get(codeId) ?? "removed code")
+          : "";
+    type Row = [string, string, string, string, string, string, string, string];
+    // Opinions and conflict resolutions interleave chronologically, so
+    // the file reads as what happened, in order, including who settled
+    // each disagreement and how.
+    const events: Row[] = [
+      ...data.decisions.map((d): Row => {
+        const rec = recById.get(d.record_id);
+        return [
+          t(d.decided_at),
+          stageOf(d.stage),
+          "opinion",
+          d.decision,
+          detailOf(d.decision, d.reason_id, d.inclusion_code_id),
+          nameOf(d.decided_by),
+          rec?.doi ?? "",
+          cap(rec?.title),
+        ];
+      }),
+      ...[...data.resolutions.values()].map((r): Row => {
+        const rec = recById.get(r.record_id);
+        return [
+          t(r.resolved_at),
+          stageOf(r.stage),
+          "conflict resolution",
+          r.decision,
+          detailOf(r.decision, r.reason_id, r.inclusion_code_id),
+          nameOf(r.resolved_by),
+          rec?.doi ?? "",
+          cap(rec?.title),
+        ];
+      }),
+    ].sort((a, b) => a[0].localeCompare(b[0]));
     downloadFile(
       `${base}-screening-log.csv`,
       buildCsv(
         [
-          "timestamp",
+          "time",
           "stage",
+          "event",
           "decision",
-          "reason",
-          "inclusion code",
+          "reason_or_code",
           "reviewer",
-          "title",
           "doi",
+          "title",
         ],
-        rows
+        events
       ),
       "text/csv"
     );
