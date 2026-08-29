@@ -43,6 +43,70 @@ export default function PrescreenPanel({
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const stopRef = useRef(false);
+  // The prescreen judges purely against the research question and the
+  // criteria, so running is gated until all three exist; the panel
+  // fetches them fresh and forces entry here if any are missing.
+  const [rqText, setRqText] = useState("");
+  const [incText, setIncText] = useState("");
+  const [excText, setExcText] = useState("");
+  const [setupLoaded, setSetupLoaded] = useState(false);
+  const [savingSetup, setSavingSetup] = useState(false);
+  const [setupSaved, setSetupSaved] = useState(false);
+  const ready =
+    setupLoaded &&
+    rqText.trim().length > 0 &&
+    incText.trim().length > 0 &&
+    excText.trim().length > 0;
+  const needsSetup = setupLoaded && (!ready || !setupSaved);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("projects")
+        .select("research_question, inclusion_criteria, exclusion_criteria")
+        .eq("id", project.id)
+        .single();
+      if (cancelled) return;
+      setRqText(data?.research_question ?? "");
+      setIncText(data?.inclusion_criteria ?? "");
+      setExcText(data?.exclusion_criteria ?? "");
+      setSetupSaved(
+        Boolean(
+          data?.research_question?.trim() &&
+            data?.inclusion_criteria?.trim() &&
+            data?.exclusion_criteria?.trim()
+        )
+      );
+      setSetupLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, project.id]);
+
+  async function saveSetup() {
+    if (!ready || savingSetup) return;
+    setSavingSetup(true);
+    setError(null);
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("projects")
+      .update({
+        research_question: rqText.trim(),
+        inclusion_criteria: incText.trim(),
+        exclusion_criteria: excText.trim(),
+      })
+      .eq("id", project.id);
+    setSavingSetup(false);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setSetupSaved(true);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -219,7 +283,7 @@ export default function PrescreenPanel({
     const stopNote = stopRef.current ? " (stopped early)" : "";
     if (mode === "live") {
       setSummary(
-        `Prescreen${stopNote}: ${excluded} record(s) removed as clearly ineligible, ${passed} passed to human screening, ${skipped} skipped (no usable abstract or already screened)${failed > 0 ? `, ${failed} failed (rerun to retry; stored votes are reused)` : ""}.`
+        `Prescreen${stopNote}: ${excluded} record(s) removed as clearly ineligible, ${passed} passed to human screening, ${skipped} skipped (already screened)${failed > 0 ? `, ${failed} failed (rerun to retry; stored votes are reused)` : ""}.`
       );
       onDone();
     } else {
@@ -276,8 +340,52 @@ export default function PrescreenPanel({
               in your queue. Removed records are counted in the PRISMA
               diagram as ineligible by automation, stay browsable under the
               records filter, and can be restored with one click. Records
-              without a usable abstract always go to humans.
+              with little or no abstract are removed only when the title
+              alone makes ineligibility unmistakable (proceedings front
+              matter, calls for papers, and similar search debris);
+              anything less certain goes to humans.
             </p>
+
+            {needsSetup && (
+              <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
+                <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                  Before the AI can screen anything, it needs the exact
+                  yardsticks your team screens by. It judges purely against
+                  these three fields; fill in and save whatever is missing.
+                </p>
+                <label className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+                  Research question(s)
+                  <textarea
+                    value={rqText}
+                    onChange={(e) => setRqText(e.target.value)}
+                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+                  Inclusion criteria
+                  <textarea
+                    value={incText}
+                    onChange={(e) => setIncText(e.target.value)}
+                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+                  Exclusion criteria
+                  <textarea
+                    value={excText}
+                    onChange={(e) => setExcText(e.target.value)}
+                    className="min-h-14 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal text-zinc-900 outline-none dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                  />
+                </label>
+                <button
+                  onClick={saveSetup}
+                  disabled={!ready || savingSetup}
+                  className="self-start rounded-full bg-amber-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-800 disabled:opacity-50"
+                >
+                  {savingSetup ? "Saving..." : "Save and unlock the prescreen"}
+                </button>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
@@ -312,7 +420,7 @@ export default function PrescreenPanel({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => run("validate")}
-                disabled={running !== null || !hasKey}
+                disabled={running !== null || !hasKey || !setupSaved}
                 className={btn}
                 title="Dry run on records your team already screened: reports what the prescreen WOULD have removed and whether any human include would have been lost. Changes nothing."
               >
@@ -320,7 +428,7 @@ export default function PrescreenPanel({
               </button>
               <button
                 onClick={() => run("live")}
-                disabled={running !== null || !hasKey}
+                disabled={running !== null || !hasKey || !setupSaved}
                 className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
                 title="Evaluates every unscreened record; unanimously ineligible ones move out of the screening queues."
               >

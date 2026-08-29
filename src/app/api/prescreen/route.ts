@@ -5,7 +5,6 @@ import {
   FRAMINGS,
   PARTNER_FRAMINGS,
   PRESCREEN_PROMPT_VERSION,
-  assessable,
   criteriaHash,
   extractionPrompt,
   parseExtraction,
@@ -171,10 +170,14 @@ export async function POST(req: Request) {
     .select("research_question, inclusion_criteria, exclusion_criteria")
     .eq("id", projectId)
     .single();
-  if (!proj?.inclusion_criteria?.trim() || !proj?.exclusion_criteria?.trim()) {
+  if (
+    !proj?.research_question?.trim() ||
+    !proj?.inclusion_criteria?.trim() ||
+    !proj?.exclusion_criteria?.trim()
+  ) {
     return NextResponse.json({
       error:
-        "The prescreen needs the inclusion AND exclusion criteria recorded (screening room, criteria panel) before it can judge anything.",
+        "The prescreen needs the research question and the inclusion AND exclusion criteria recorded before it can judge anything.",
     });
   }
 
@@ -186,9 +189,9 @@ export async function POST(req: Request) {
   if (mode === "live" && ((taCount ?? 0) > 0 || rec.status !== "active")) {
     return NextResponse.json({ skipped: "already_screened" });
   }
-  if (!assessable(rec.abstract)) {
-    return NextResponse.json({ skipped: "no_abstract" });
-  }
+  // Thin or missing abstracts are judged too (search-net debris like
+  // proceedings front matter is often title-only); the decision
+  // standard confines title-only judgments to unmistakable cases.
 
   const criteriaText = `${proj.inclusion_criteria}\n${proj.exclusion_criteria}`;
   const cHash = criteriaHash(
@@ -245,7 +248,7 @@ export async function POST(req: Request) {
           m,
           key,
           extractionPrompt(),
-          `Title: ${rec.title}\n\nAbstract: ${rec.abstract}`
+          `Title: ${rec.title}\n\nAbstract: ${rec.abstract?.trim() || "(no abstract available)"}`
         );
         const facts = call.text ? parseExtraction(call.text) : null;
         factsByModel.set(m, facts);
@@ -279,7 +282,7 @@ export async function POST(req: Request) {
           ),
           voteUserPrompt(
             rec.title,
-            rec.abstract ?? "",
+            rec.abstract,
             factsByModel.get(slot.model) ?? null
           )
         );
