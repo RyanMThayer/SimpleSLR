@@ -361,6 +361,17 @@ export default function RecordsClient({
 
       const df = decisionFilter;
       const matches = (r: RecordRow): boolean => {
+        // The AI prescreen is a title/abstract stage exclusion, so its
+        // removals surface under the excluded filters for that stage
+        // (under "any reason"; their reason lives in the vote ledger),
+        // and never under undecided.
+        if (r.status === "prescreen_excluded") {
+          return (
+            df.kind === "exclude" &&
+            df.reasonId === "any" &&
+            (df.stage === "any" || df.stage === "title_abstract")
+          );
+        }
         if (df.kind === "undecided") return (ta.get(r.id)?.length ?? 0) === 0;
         // Only decisions the current viewer may see participate in
         // filtering, so a blinded record cannot be flushed out by
