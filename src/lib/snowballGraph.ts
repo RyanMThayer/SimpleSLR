@@ -61,6 +61,8 @@ export type RecordLite = {
   year: number | null;
   status: string;
   batch_id: string | null;
+  /** Keeper pointer for duplicate rows; links resolve through it. */
+  duplicate_of?: string | null;
 };
 
 export type BatchLite = {
@@ -238,15 +240,30 @@ export function buildSnowballGraph(input: {
     return node;
   };
 
+  // A link that lands on a duplicate row follows duplicate_of to the
+  // keeper: THIS is how cross-seed overlap survives, because a paper
+  // one seed already surfaced arrives from the next seed as a
+  // duplicate whose link must fold onto the keeper's node. Chains are
+  // walked with a hop cap; a duplicate with no surviving keeper drops.
+  const resolve = (id: string): RecordLite | undefined => {
+    let rec = records.get(id);
+    for (let hop = 0; rec && rec.status === "duplicate" && hop < 8; hop++) {
+      const next = rec.duplicate_of ? records.get(rec.duplicate_of) : undefined;
+      if (!next || next.id === rec.id) break;
+      rec = next;
+    }
+    return rec;
+  };
+
   for (const l of links) {
-    const seed = records.get(l.seed_record_id);
-    const rec = records.get(l.record_id);
-    // Deleted records or ones merged away as duplicates leave the map;
-    // their keeper carries its own links.
+    const seed = resolve(l.seed_record_id);
+    const rec = resolve(l.record_id);
     if (!seed || !rec) continue;
     if (seed.status === "duplicate" || rec.status === "duplicate") continue;
+    // Resolution can fold a link back onto its own seed.
+    if (seed.id === rec.id) continue;
     const dir = l.direction === "forward" ? "forward" : "backward";
-    const key = `${l.seed_record_id}:${l.record_id}:${dir}`;
+    const key = `${seed.id}:${rec.id}:${dir}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const seedNode = addNode(seed, true);
@@ -255,10 +272,10 @@ export function buildSnowballGraph(input: {
     recNode.degree++;
     edges.push({
       id: key,
-      source: l.seed_record_id,
-      target: l.record_id,
-      seedId: l.seed_record_id,
-      recordId: l.record_id,
+      source: seed.id,
+      target: rec.id,
+      seedId: seed.id,
+      recordId: rec.id,
       direction: dir,
     });
   }

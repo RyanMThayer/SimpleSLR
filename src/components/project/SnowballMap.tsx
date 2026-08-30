@@ -286,13 +286,31 @@ export default function SnowballMap({ project }: { project: Project }) {
         ...new Set(links.flatMap((l) => [l.record_id, l.seed_record_id])),
       ];
       const records = new Map<string, RecordLite>();
-      for (let i = 0; i < ids.length; i += 100) {
-        const { data: recs, error: rErr } = await supabase
-          .from("records")
-          .select("id, title, authors, year, status, batch_id")
-          .in("id", ids.slice(i, i + 100));
-        if (rErr) throw new Error(rErr.message);
-        (recs ?? []).forEach((r) => records.set(r.id, r as RecordLite));
+      const fetchRecords = async (want: string[]) => {
+        for (let i = 0; i < want.length; i += 100) {
+          const { data: recs, error: rErr } = await supabase
+            .from("records")
+            .select("id, title, authors, year, status, batch_id, duplicate_of")
+            .in("id", want.slice(i, i + 100));
+          if (rErr) throw new Error(rErr.message);
+          (recs ?? []).forEach((r) => records.set(r.id, r as RecordLite));
+        }
+      };
+      await fetchRecords(ids);
+      // Links onto duplicate rows resolve through duplicate_of to the
+      // keeper; pull keepers the link ids alone did not cover (chains
+      // settle within a few rounds).
+      for (let round = 0; round < 4; round++) {
+        const missing = [
+          ...new Set(
+            [...records.values()]
+              .filter((r) => r.status === "duplicate" && r.duplicate_of)
+              .map((r) => r.duplicate_of as string)
+              .filter((id) => !records.has(id))
+          ),
+        ];
+        if (missing.length === 0) break;
+        await fetchRecords(missing);
       }
 
       const batchRows = await paged<BatchLite>((f, t) =>
@@ -631,20 +649,17 @@ export default function SnowballMap({ project }: { project: Project }) {
       key: string;
       seedId: string;
       dir: "backward" | "forward";
-      shared: boolean;
       outcome: MapStatus;
       count: number;
     };
     const pathMap = new Map<string, FlowPath>();
     const outcomePapers = new Map<MapStatus, Set<string>>();
     rows.forEach((r) => {
-      const shared = (seedsOf.get(r.recordId)?.size ?? 1) > 1;
-      const key = `${r.seedId}|${r.dir}|${shared ? "s" : "o"}|${r.outcome}`;
+      const key = `${r.seedId}|${r.dir}|${r.outcome}`;
       const p = pathMap.get(key) ?? {
         key,
         seedId: r.seedId,
         dir: r.dir,
-        shared,
         outcome: r.outcome,
         count: 0,
       };
@@ -1011,9 +1026,6 @@ export default function SnowballMap({ project }: { project: Project }) {
                   const dirOrder = (["backward", "forward"] as const).filter(
                     (d) => paths.some((p) => p.dir === d)
                   );
-                  const corrOrder = ["o", "s"].filter((c) =>
-                    paths.some((p) => (p.shared ? "s" : "o") === c)
-                  );
                   const outOrder = (
                     ["included", "conflict", "excluded", "screening"] as MapStatus[]
                   ).filter((o) => paths.some((p) => p.outcome === o));
@@ -1024,15 +1036,9 @@ export default function SnowballMap({ project }: { project: Project }) {
                       of: (p: (typeof paths)[number]) => p.seedId,
                     },
                     {
-                      x: 545,
+                      x: 600,
                       keys: dirOrder as readonly string[],
                       of: (p: (typeof paths)[number]) => p.dir,
-                    },
-                    {
-                      x: 765,
-                      keys: corrOrder,
-                      of: (p: (typeof paths)[number]) =>
-                        p.shared ? "s" : "o",
                     },
                     {
                       x: 1000,
@@ -1052,9 +1058,8 @@ export default function SnowballMap({ project }: { project: Project }) {
                         axes[0].keys.indexOf(b2.seedId) ||
                       axes[1].keys.indexOf(a2.dir) -
                         axes[1].keys.indexOf(b2.dir) ||
-                      Number(a2.shared) - Number(b2.shared) ||
-                      axes[3].keys.indexOf(a2.outcome) -
-                        axes[3].keys.indexOf(b2.outcome)
+                      axes[2].keys.indexOf(a2.outcome) -
+                        axes[2].keys.indexOf(b2.outcome)
                   );
                   const layouts = axes.map((ax) => {
                     const totals = new Map<string, number>();
@@ -1151,22 +1156,15 @@ export default function SnowballMap({ project }: { project: Project }) {
                     backward: "backward",
                     forward: "forward",
                   };
-                  const CORR_LABEL: Record<string, string> = {
-                    o: "one seed",
-                    s: "2+ seeds",
-                  };
                   const axisKeyLabel = (ai: number, k: string): string => {
                     if (ai === 0) return nodeById.get(k)?.label ?? "";
                     if (ai === 1) return DIR_LABEL[k] ?? k;
-                    if (ai === 2) return CORR_LABEL[k] ?? k;
                     return STATUS_LABEL[k as MapStatus];
                   };
                   const tipFor = (p: (typeof paths)[number]): string[] => [
                     `${nodeById.get(p.seedId)?.label ?? "seed"} · ${
                       DIR_LABEL[p.dir]
-                    } · ${CORR_LABEL[p.shared ? "s" : "o"]} · ${
-                      STATUS_LABEL[p.outcome]
-                    }`,
+                    } · ${STATUS_LABEL[p.outcome]}`,
                     `${p.count} paper(s) on this path`,
                   ];
                   const moveTip = (e2: React.PointerEvent) => {
@@ -1178,12 +1176,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                       });
                     }
                   };
-                  const HEADERS = [
-                    "seed papers",
-                    "direction",
-                    "found by",
-                    "outcome",
-                  ];
+                  const HEADERS = ["seed papers", "direction", "outcome"];
                   return (
                     <g>
                       {sorted.map((p, pi) => (
@@ -1234,7 +1227,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                             const h2 = (L.totals.get(k) ?? 0) * L.unit;
                             const links = L.totals.get(k) ?? 0;
                             const uniq =
-                              ai === 3
+                              ai === 2
                                 ? (outcomePapers.get(k as MapStatus)?.size ??
                                   links)
                                 : links;
@@ -1254,7 +1247,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                   setFlowHover(`n:${ai}:${k}`);
                                   setFlowTip([
                                     axisKeyLabel(ai, k),
-                                    ai === 3 && uniq !== links
+                                    ai === 2 && uniq !== links
                                       ? `${uniq} paper(s) · ${links} path(s)`
                                       : `${links} paper path(s)`,
                                   ]);
@@ -1274,7 +1267,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                   height={Math.max(1.5, h2)}
                                   rx={3}
                                   fill={
-                                    ai === 3
+                                    ai === 2
                                       ? k === "conflict"
                                         ? "url(#snowmap-conflict)"
                                         : pal[
@@ -1303,7 +1296,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                     )}
                                   </text>
                                 )}
-                                {ai > 0 && ai < 3 && h2 >= 8 && (
+                                {ai === 1 && h2 >= 8 && (
                                   <text
                                     x={L.x + NW + 7}
                                     y={top + h2 / 2 + 4}
@@ -1316,7 +1309,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                     {axisKeyLabel(ai, k)} · {links}
                                   </text>
                                 )}
-                                {ai === 3 && (
+                                {ai === 2 && (
                                   <text
                                     x={L.x + NW + 8}
                                     y={top + Math.max(1.5, h2) / 2 + 4}

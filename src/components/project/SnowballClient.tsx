@@ -38,11 +38,59 @@ type Candidate = {
 };
 
 type CorpusKey = {
+  id: string;
+  status: string;
+  duplicate_of: string | null;
   norm_doi: string | null;
   norm_title: string | null;
   authors: string | null;
   year: number | null;
 };
+
+/**
+ * Import-time dedup state carrying record ids, so a candidate that
+ * matches an EXISTING record can point its provenance link at that
+ * record's keeper. This is what lets the citation map draw a paper
+ * found by several seeds as one node with an edge from each of them;
+ * before, the link died with the duplicate row and overlap never
+ * showed. Newly imported rows join the maps with a null id (a
+ * within-batch twin has no keeper and needs no extra link).
+ */
+function buildDedupState(corpus: CorpusKey[]) {
+  const byId = new Map(corpus.map((k) => [k.id, k]));
+  const dois = new Map<string, string | null>();
+  type TitleInfo = {
+    id: string | null;
+    tokens: Set<string>;
+    year: number | null;
+  };
+  const titles = new Map<string, TitleInfo[]>();
+  corpus.forEach((k) => {
+    if (k.norm_doi) {
+      const cur = dois.get(k.norm_doi);
+      const curIsDup = cur ? byId.get(cur)?.status === "duplicate" : true;
+      if (!dois.has(k.norm_doi) || (curIsDup && k.status !== "duplicate")) {
+        dois.set(k.norm_doi, k.id);
+      }
+    }
+    if (k.norm_title) {
+      const list = titles.get(k.norm_title) ?? [];
+      list.push({ id: k.id, tokens: authorTokens(k.authors), year: k.year });
+      titles.set(k.norm_title, list);
+    }
+  });
+  const keeperOf = (id: string | null): string | null => {
+    if (!id) return null;
+    let rec = byId.get(id);
+    for (let hop = 0; rec && rec.status === "duplicate" && hop < 8; hop++) {
+      const next = rec.duplicate_of ? byId.get(rec.duplicate_of) : undefined;
+      if (!next || next.id === rec.id) break;
+      rec = next;
+    }
+    return rec && rec.status !== "duplicate" ? rec.id : null;
+  };
+  return { dois, titles, keeperOf };
+}
 
 export default function SnowballClient({
   project,
@@ -182,7 +230,7 @@ export default function SnowballClient({
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase
         .from("records")
-        .select("norm_doi, norm_title, authors, year")
+        .select("id, status, duplicate_of, norm_doi, norm_title, authors, year")
         .eq("project_id", projectId)
         .range(from, from + 999);
       keys.push(...((data ?? []) as CorpusKey[]));
@@ -407,17 +455,7 @@ export default function SnowballClient({
       return;
     }
 
-    type TitleInfo = { tokens: Set<string>; year: number | null };
-    const existingDois = new Set<string>();
-    const titleMap = new Map<string, TitleInfo[]>();
-    corpus.forEach((k) => {
-      if (k.norm_doi) existingDois.add(k.norm_doi);
-      if (k.norm_title) {
-        const list = titleMap.get(k.norm_title) ?? [];
-        list.push({ tokens: authorTokens(k.authors), year: k.year });
-        titleMap.set(k.norm_title, list);
-      }
-    });
+    const dedup = buildDedupState(corpus);
 
     let imported = 0;
     let duplicates = 0;
@@ -425,19 +463,30 @@ export default function SnowballClient({
     const rows = refs.map((ref) => {
       const norm_doi = normalizeDoi(ref.doi);
       const norm_title = normalizeTitle(ref.title);
-      const info = { tokens: authorTokens(ref.authors), year: ref.year };
-      const titleDup = (titleMap.get(norm_title) ?? []).some((t) =>
+      const info = {
+        id: null as string | null,
+        tokens: authorTokens(ref.authors),
+        year: ref.year,
+      };
+      const titleHit = (dedup.titles.get(norm_title) ?? []).find((t) =>
         t.tokens.size > 0 && info.tokens.size > 0
           ? sharesAuthor(t.tokens, info.tokens)
           : t.year !== null && info.year !== null && t.year === info.year
       );
-      const isDup =
-        (norm_doi !== null && existingDois.has(norm_doi)) || titleDup;
-      if (norm_doi) existingDois.add(norm_doi);
+      const doiHit = norm_doi !== null && dedup.dois.has(norm_doi);
+      const isDup = doiHit || Boolean(titleHit);
+      const keeper = isDup
+        ? dedup.keeperOf(
+            (doiHit ? (dedup.dois.get(norm_doi as string) ?? null) : null) ??
+              titleHit?.id ??
+              null
+          )
+        : null;
+      if (norm_doi && !dedup.dois.has(norm_doi)) dedup.dois.set(norm_doi, null);
       if (norm_title) {
-        const list = titleMap.get(norm_title) ?? [];
+        const list = dedup.titles.get(norm_title) ?? [];
         list.push(info);
-        titleMap.set(norm_title, list);
+        dedup.titles.set(norm_title, list);
       }
       if (isDup) duplicates++;
       else imported++;
@@ -453,6 +502,7 @@ export default function SnowballClient({
         url: ref.url,
         source_label: `Snowball ${dir}`,
         status: isDup ? "duplicate" : "active",
+        duplicate_of: keeper,
         norm_doi,
         norm_title,
       };
@@ -487,16 +537,30 @@ export default function SnowballClient({
           norm_title: src.norm_title,
         });
       });
-      const linkRows = (inserted ?? []).map((row) => ({
-        project_id: projectId,
-        record_id: row.id,
-        seed_record_id: seed.id,
-        direction: dir,
-      }));
+      const linkRows = (inserted ?? [])
+        .map((row, j) => {
+          const src = rows[i + j];
+          // A duplicate of an existing record hands its provenance to
+          // the keeper so the map sees the overlap; a within-batch
+          // twin has no keeper and needs no second link.
+          const target =
+            src && src.status === "duplicate" ? src.duplicate_of : row.id;
+          if (!target || target === seed.id) return null;
+          return {
+            project_id: projectId,
+            record_id: target,
+            seed_record_id: seed.id,
+            direction: dir,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
       if (linkRows.length > 0) {
         const { error: lkErr } = await supabase
           .from("snowball_links")
-          .insert(linkRows);
+          .upsert(linkRows, {
+            onConflict: "record_id,seed_record_id,direction",
+            ignoreDuplicates: true,
+          });
         if (lkErr && lkErr.message.includes("does not exist")) {
           linksMissing = true;
         } else if (lkErr) {
@@ -564,18 +628,9 @@ export default function SnowballClient({
     const singleSeed =
       selectedSeeds.size === 1 ? [...selectedSeeds][0] : null;
 
-    // Dedup state, corroborated like file imports.
-    type TitleInfo = { tokens: Set<string>; year: number | null };
-    const existingDois = new Set<string>();
-    const titleMap = new Map<string, TitleInfo[]>();
-    corpus.forEach((k) => {
-      if (k.norm_doi) existingDois.add(k.norm_doi);
-      if (k.norm_title) {
-        const list = titleMap.get(k.norm_title) ?? [];
-        list.push({ tokens: authorTokens(k.authors), year: k.year });
-        titleMap.set(k.norm_title, list);
-      }
-    });
+    // Dedup state, corroborated like file imports, with record ids so
+    // duplicate finds hand their provenance links to the keeper.
+    const dedup = buildDedupState(corpus);
 
     let imported = 0;
     let duplicates = 0;
@@ -611,18 +666,32 @@ export default function SnowballClient({
       const rows = group.map((c) => {
         const norm_doi = normalizeDoi(c.ref.doi);
         const norm_title = normalizeTitle(c.ref.title);
-        const info = { tokens: authorTokens(c.ref.authors), year: c.ref.year };
-        const titleDup = (titleMap.get(norm_title) ?? []).some((t) =>
+        const info = {
+          id: null as string | null,
+          tokens: authorTokens(c.ref.authors),
+          year: c.ref.year,
+        };
+        const titleHit = (dedup.titles.get(norm_title) ?? []).find((t) =>
           t.tokens.size > 0 && info.tokens.size > 0
             ? sharesAuthor(t.tokens, info.tokens)
             : t.year !== null && info.year !== null && t.year === info.year
         );
-        const isDup = (norm_doi !== null && existingDois.has(norm_doi)) || titleDup;
-        if (norm_doi) existingDois.add(norm_doi);
+        const doiHit = norm_doi !== null && dedup.dois.has(norm_doi);
+        const isDup = doiHit || Boolean(titleHit);
+        const keeper = isDup
+          ? dedup.keeperOf(
+              (doiHit ? (dedup.dois.get(norm_doi as string) ?? null) : null) ??
+                titleHit?.id ??
+                null
+            )
+          : null;
+        if (norm_doi && !dedup.dois.has(norm_doi)) {
+          dedup.dois.set(norm_doi, null);
+        }
         if (norm_title) {
-          const list = titleMap.get(norm_title) ?? [];
+          const list = dedup.titles.get(norm_title) ?? [];
           list.push(info);
-          titleMap.set(norm_title, list);
+          dedup.titles.set(norm_title, list);
         }
         if (isDup) duplicates++;
         else imported++;
@@ -640,6 +709,7 @@ export default function SnowballClient({
           url: c.ref.url,
           source_label: `Snowball ${dir}`,
           status: isDup ? "duplicate" : "active",
+          duplicate_of: keeper,
           norm_doi,
           norm_title,
         };
@@ -675,15 +745,23 @@ export default function SnowballClient({
         }[] = [];
         (inserted ?? []).forEach((row, j) => {
           const cand = group[i + j];
-          if (!cand) return;
+          const src = rows[i + j];
+          if (!cand || !src) return;
+          // A duplicate of an existing record hands its provenance to
+          // the keeper so the map sees the overlap; a within-batch
+          // twin has no keeper and needs no second link.
+          const target =
+            src.status === "duplicate" ? src.duplicate_of : row.id;
+          if (!target) return;
           const seen = new Set<string>();
           for (const s of cand.sources) {
             const k = `${s.seedId}:${s.dir}`;
             if (seen.has(k)) continue;
             seen.add(k);
+            if (s.seedId === target) continue;
             linkRows.push({
               project_id: projectId,
-              record_id: row.id,
+              record_id: target,
               seed_record_id: s.seedId,
               direction: s.dir,
             });
@@ -692,7 +770,10 @@ export default function SnowballClient({
         if (linkRows.length > 0) {
           const { error: lkErr } = await supabase
             .from("snowball_links")
-            .insert(linkRows);
+            .upsert(linkRows, {
+              onConflict: "record_id,seed_record_id,direction",
+              ignoreDuplicates: true,
+            });
           if (lkErr && lkErr.message.includes("does not exist")) {
             linksMissing = true;
           } else if (lkErr) {
