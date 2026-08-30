@@ -192,6 +192,19 @@ function edgePath(e: SnowballEdge): string | null {
   return `M ${ax} ${ay} Q ${mx} ${my} ${bx} ${by}`;
 }
 
+/** Axis tick spacing for the yield bars: 1, 2, or 5 times a power of
+ * ten, whichever first keeps the count near seven. */
+function niceStep(max: number): number {
+  if (max <= 8) return 1;
+  const pow = Math.pow(10, Math.max(0, Math.floor(Math.log10(max / 7))));
+  for (const m of [1, 2, 5]) if (7 * m * pow >= max) return m * pow;
+  return 10 * pow;
+}
+
+function truncateLabel(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
 type Loaded = {
   nodes: SnowballNode[];
   edges: SnowballEdge[];
@@ -202,7 +215,9 @@ export default function SnowballMap({ project }: { project: Project }) {
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
-  const [layout, setLayout] = useState<"network" | "timeline">("network");
+  const [layout, setLayout] = useState<"network" | "timeline" | "yield">(
+    "network"
+  );
   const [showBackward, setShowBackward] = useState(true);
   const [showForward, setShowForward] = useState(true);
   const [statusOn, setStatusOn] = useState<Record<MapStatus, boolean>>({
@@ -384,6 +399,9 @@ export default function SnowballMap({ project }: { project: Project }) {
 
   useEffect(() => {
     if (!data || data.nodes.length === 0) return;
+    // The yield view is a plain chart with no physics; keep the last
+    // network positions untouched for when the user switches back.
+    if (layout === "yield") return;
     const nodes = data.nodes;
     const seeds = nodes.filter((n) => n.isSeed);
     const bySeed = new Map<string, SnowballNode>(seeds.map((s) => [s.id, s]));
@@ -573,6 +591,47 @@ export default function SnowballMap({ project }: { project: Project }) {
   const edgeVisible = (e: SnowballEdge) =>
     directionPass(e) && visibleIds.has(e.seedId) && visibleIds.has(e.recordId);
 
+  // One row per seed for the yield view: how many papers its citation
+  // searches surfaced and where each stands, honoring the direction
+  // and status chips. A paper found from several seeds counts once in
+  // each of their bars.
+  const yieldRows = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const perSeed = new Map<string, Map<string, MapStatus>>();
+    nodes.filter((n) => n.isSeed).forEach((n) => perSeed.set(n.id, new Map()));
+    const seedsOf = new Map<string, Set<string>>();
+    edges.forEach((e) => {
+      if (!directionPass(e)) return;
+      const cand = byId.get(e.recordId);
+      if (!cand || !statusOn[cand.status]) return;
+      perSeed.get(e.seedId)?.set(e.recordId, cand.status);
+      const s = seedsOf.get(e.recordId) ?? new Set<string>();
+      s.add(e.seedId);
+      seedsOf.set(e.recordId, s);
+    });
+    let overlap = 0;
+    seedsOf.forEach((s) => {
+      if (s.size > 1) overlap++;
+    });
+    const rows = [...perSeed.entries()]
+      .flatMap(([id, m]) => {
+        const seed = byId.get(id);
+        if (!seed) return [];
+        const counts: Record<MapStatus, number> = {
+          included: 0,
+          conflict: 0,
+          excluded: 0,
+          screening: 0,
+        };
+        m.forEach((st) => counts[st]++);
+        return [{ seed, counts, total: m.size }];
+      })
+      .sort(
+        (a, b) => b.total - a.total || a.seed.label.localeCompare(b.seed.label)
+      );
+    return { rows, overlap };
+  }, [nodes, edges, directionPass, statusOn]);
+
   const neighborhood = useMemo(() => {
     const focus = selectedId ?? hoverId;
     if (!focus) return null;
@@ -599,9 +658,9 @@ export default function SnowballMap({ project }: { project: Project }) {
   const edgeEmphasis = (e: SnowballEdge): { opacity: number; width: number } => {
     const focus = selectedId ?? hoverId;
     const touches = focus && (e.seedId === focus || e.recordId === focus);
-    if (touches) return { opacity: 0.85, width: 2 };
-    if (focus || q) return { opacity: 0.14, width: 1.2 };
-    return { opacity: 0.4, width: 1.2 };
+    if (touches) return { opacity: 0.85, width: 2.6 };
+    if (focus || q) return { opacity: 0.14, width: 1.6 };
+    return { opacity: 0.5, width: 1.6 };
   };
 
   const selected = selectedId
@@ -772,14 +831,26 @@ export default function SnowballMap({ project }: { project: Project }) {
             ))}
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
             <button
-              onClick={() =>
-                setLayout((l) => (l === "network" ? "timeline" : "network"))
-              }
+              onClick={() => setLayout("network")}
+              className={chip(layout === "network")}
+              title="Force directed citation network"
+            >
+              map
+            </button>
+            <button
+              onClick={() => setLayout("timeline")}
               className={chip(layout === "timeline")}
               title="Timeline pins each paper to its publication year on the horizontal axis"
               disabled={!yearScale}
             >
               timeline
+            </button>
+            <button
+              onClick={() => setLayout("yield")}
+              className={chip(layout === "yield")}
+              title="One bar per seed: how many papers its citation searches found and where they stand"
+            >
+              seed yield
             </button>
             <input
               value={search}
@@ -793,12 +864,16 @@ export default function SnowballMap({ project }: { project: Project }) {
             <svg
               ref={svgRef}
               viewBox={`0 0 ${W} ${H}`}
-              className="h-[68vh] min-h-[420px] w-full min-w-0 cursor-grab touch-none select-none active:cursor-grabbing"
+              className={`h-[68vh] min-h-[420px] w-full min-w-0 touch-none select-none ${
+                layout === "yield" ? "" : "cursor-grab active:cursor-grabbing"
+              }`}
               style={{ background: pal.surface }}
-              onWheel={onWheel}
-              onPointerDown={(e) => onPointerDown(e)}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
+              onWheel={layout === "yield" ? undefined : onWheel}
+              onPointerDown={
+                layout === "yield" ? undefined : (e) => onPointerDown(e)
+              }
+              onPointerMove={layout === "yield" ? undefined : onPointerMove}
+              onPointerUp={layout === "yield" ? undefined : onPointerUp}
               onPointerLeave={() => {
                 setHoverId(null);
                 setHoverPos(null);
@@ -820,12 +895,22 @@ export default function SnowballMap({ project }: { project: Project }) {
                   viewBox="0 0 10 10"
                   refX="8"
                   refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
+                  markerWidth="8.5"
+                  markerHeight="8.5"
                   orient="auto-start-reverse"
                 >
                   <path d="M 0 1 L 9 5 L 0 9 Z" fill={pal.edge} />
                 </marker>
+                <pattern
+                  id="snowmap-conflict"
+                  width="7"
+                  height="7"
+                  patternTransform="rotate(45)"
+                  patternUnits="userSpaceOnUse"
+                >
+                  <rect width="7" height="7" fill={pal.included} />
+                  <rect width="3.5" height="7" fill={pal.excluded} />
+                </pattern>
                 <filter id="snowmap-shadow" x="-40%" y="-40%" width="180%" height="180%">
                   <feDropShadow
                     dx="0"
@@ -838,6 +923,171 @@ export default function SnowballMap({ project }: { project: Project }) {
               </defs>
               <rect width={W} height={H} fill="url(#snowmap-grid)" />
 
+              {layout === "yield" ? (
+                (() => {
+                  const rows = yieldRows.rows;
+                  const GUT = 205;
+                  const RIGHT = 60;
+                  const innerW = W - GUT - RIGHT;
+                  const n = Math.max(1, rows.length);
+                  const rowH = Math.min(58, (H - 76) / n);
+                  // Few seeds float to the vertical center instead of
+                  // huddling at the top of the canvas.
+                  const TOP = 28 + Math.max(0, (H - 76 - n * rowH) / 2);
+                  const barH = Math.min(23, Math.max(6, rowH * 0.55));
+                  const xMax = Math.max(1, ...rows.map((r) => r.total));
+                  const step = niceStep(xMax);
+                  const x = (v: number) => GUT + (v / xMax) * innerW;
+                  const bottom = TOP + rows.length * rowH;
+                  const ticks: number[] = [];
+                  for (let v = 0; v <= xMax; v += step) ticks.push(v);
+                  const order: MapStatus[] = [
+                    "included",
+                    "conflict",
+                    "excluded",
+                    "screening",
+                  ];
+                  return (
+                    <g>
+                      {ticks.map((v) => (
+                        <g key={v}>
+                          <line
+                            x1={x(v)}
+                            x2={x(v)}
+                            y1={TOP - 8}
+                            y2={bottom + 8}
+                            stroke={pal.edge}
+                            strokeOpacity={v === 0 ? 0.55 : 0.18}
+                          />
+                          <text
+                            x={x(v)}
+                            y={bottom + 26}
+                            textAnchor="middle"
+                            fontSize={11}
+                            fill={pal.label}
+                          >
+                            {v}
+                          </text>
+                        </g>
+                      ))}
+                      <text
+                        x={W - 16}
+                        y={bottom + 26}
+                        textAnchor="end"
+                        fontSize={11}
+                        fill={pal.label}
+                      >
+                        papers found
+                      </text>
+                      {rows.map((r, i) => {
+                        const cy = TOP + i * rowH + rowH / 2;
+                        let acc = 0;
+                        return (
+                          <g
+                            key={r.seed.id}
+                            opacity={emphasis(r.seed)}
+                            className="cursor-pointer"
+                            style={{ transition: "opacity 180ms" }}
+                            onClick={() =>
+                              setSelectedId((sel) =>
+                                sel === r.seed.id ? null : r.seed.id
+                              )
+                            }
+                            onPointerEnter={(e) => {
+                              setHoverId(r.seed.id);
+                              const rect =
+                                svgRef.current?.getBoundingClientRect();
+                              if (rect) {
+                                setHoverPos({
+                                  x: e.clientX - rect.left,
+                                  y: e.clientY - rect.top,
+                                });
+                              }
+                            }}
+                            onPointerLeave={() => {
+                              setHoverId(null);
+                              setHoverPos(null);
+                            }}
+                          >
+                            <rect
+                              x={0}
+                              y={cy - rowH / 2}
+                              width={W}
+                              height={rowH}
+                              fill="transparent"
+                            />
+                            <text
+                              x={GUT - 12}
+                              y={cy + 4}
+                              textAnchor="end"
+                              fontSize={12}
+                              fontWeight={600}
+                              fill={pal.ink}
+                            >
+                              {truncateLabel(r.seed.label, 28)}
+                            </text>
+                            {order.map((s) => {
+                              const v = r.counts[s];
+                              if (v === 0) return null;
+                              const x1 = x(acc);
+                              acc += v;
+                              const w = x(acc) - x1;
+                              const drawn = Math.max(2, w - 2);
+                              return (
+                                <g key={s}>
+                                  <rect
+                                    x={x1}
+                                    y={cy - barH / 2}
+                                    width={drawn}
+                                    height={barH}
+                                    fill={
+                                      s === "conflict"
+                                        ? "url(#snowmap-conflict)"
+                                        : pal[s]
+                                    }
+                                  />
+                                  {drawn >= 26 && (
+                                    <text
+                                      x={x1 + drawn / 2}
+                                      y={cy + 3.5}
+                                      textAnchor="middle"
+                                      fontSize={10}
+                                      fontWeight={600}
+                                      fill="#ffffff"
+                                    >
+                                      {v}
+                                    </text>
+                                  )}
+                                </g>
+                              );
+                            })}
+                            <text
+                              x={x(r.total) + 8}
+                              y={cy + 4}
+                              fontSize={11.5}
+                              fill={pal.label}
+                              className="tabular-nums"
+                            >
+                              {r.total}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      {rows.every((r) => r.total === 0) && (
+                        <text
+                          x={GUT + innerW / 2}
+                          y={TOP + (bottom - TOP) / 2}
+                          textAnchor="middle"
+                          fontSize={13}
+                          fill={pal.label}
+                        >
+                          No links match the current filters.
+                        </text>
+                      )}
+                    </g>
+                  );
+                })()
+              ) : (
               <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
                 {layout === "timeline" && yearScale && (
                   <g>
@@ -963,9 +1213,11 @@ export default function SnowballMap({ project }: { project: Project }) {
                     </g>
                   ))}
               </g>
+              )}
             </svg>
 
             {/* Zoom controls */}
+            {layout !== "yield" && (
             <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1.5">
               <button
                 onClick={() => zoomAt(1.35, W / 2, H / 2)}
@@ -994,6 +1246,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                 ⛶
               </button>
             </div>
+            )}
 
             {hovered && hoverPos && !draggingNode && (
               <div
@@ -1010,9 +1263,29 @@ export default function SnowballMap({ project }: { project: Project }) {
                   {[hovered.authors, hovered.year].filter(Boolean).join(" · ")}
                 </p>
                 <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                  {hovered.isSeed
-                    ? `Seed paper · ${hovered.degree} connection(s)`
-                    : `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`}
+                  {layout === "yield" && hovered.isSeed
+                    ? (() => {
+                        const row = yieldRows.rows.find(
+                          (r) => r.seed.id === hovered.id
+                        );
+                        if (!row) return "Seed paper";
+                        const parts = (
+                          [
+                            "included",
+                            "conflict",
+                            "excluded",
+                            "screening",
+                          ] as MapStatus[]
+                        )
+                          .filter((s) => row.counts[s] > 0)
+                          .map((s) => `${row.counts[s]} ${STATUS_LABEL[s]}`);
+                        return `Found ${row.total} paper(s)${
+                          parts.length > 0 ? `: ${parts.join(", ")}` : ""
+                        }`;
+                      })()
+                    : hovered.isSeed
+                      ? `Seed paper · ${hovered.degree} connection(s)`
+                      : `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`}
                 </p>
               </div>
             )}
@@ -1128,7 +1401,13 @@ export default function SnowballMap({ project }: { project: Project }) {
               cites the seed (forward)
             </span>
             <span className="ml-auto">
-              arrows point at the cited work
+              {layout === "yield"
+                ? `each bar counts the papers that seed's searches found${
+                    yieldRows.overlap > 0
+                      ? "; a paper found from several seeds counts in each bar"
+                      : ""
+                  }`
+                : "arrows point at the cited work"}
               {hiddenCount > 0 && ` · ${hiddenCount} node(s) filtered out`}
             </span>
           </div>
