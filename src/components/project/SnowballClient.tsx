@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
 import { requiredFor, settledOutcome } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
+import SnowballMap from "@/components/project/SnowballMap";
 import { authorTokens, normalizeDoi, normalizeTitle, sharesAuthor } from "@/lib/normalize";
 import { parseRis } from "@/lib/ris";
 import { parseBibtex } from "@/lib/bibtex";
@@ -754,7 +755,7 @@ export default function SnowballClient({
     "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
+    <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
       <input
         type="file"
         accept=".ris,.txt,.bib,.bibtex,.csv,.tsv"
@@ -773,6 +774,8 @@ export default function SnowballClient({
         PRISMA. Repeat rounds as newly included papers join the seed pool,
         until nothing new turns up.
       </p>
+
+      <SnowballMap project={project} />
 
       {error && (
         <p className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
