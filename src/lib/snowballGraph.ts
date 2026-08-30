@@ -17,12 +17,7 @@ import { stageStatus } from "./outcomes";
  * opinion quota reads "screening", not its hidden votes.
  */
 
-export type MapStatus =
-  | "included"
-  | "excluded"
-  | "conflict"
-  | "screening"
-  | "prescreened";
+export type MapStatus = "included" | "excluded" | "conflict" | "screening";
 
 export type SourceKind = "openalex" | "file" | "manual" | "screening";
 
@@ -71,20 +66,89 @@ export type BatchLite = {
   origin: string | null;
 };
 
-/** First author's surname plus year, for compact on-map labels. */
+/**
+ * Split an authors field into per-author entries across the formats
+ * the import routes produce: "; " separated (RIS, BibTeX, OpenAlex all
+ * join with it), "and"/"&" separated, or comma separated, where a
+ * single word before the first comma marks surname-first pairs
+ * ("Webster, J., Watson, R.") and anything else marks full names
+ * ("Jane Webster, Richard Watson").
+ */
+export function authorEntries(authors: string | null): string[] {
+  const s = (authors ?? "").trim();
+  if (!s) return [];
+  if (s.includes(";")) {
+    return s
+      .split(";")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  const andParts = s
+    .split(/\s+and\s+|\s*&\s*/i)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (andParts.length > 1) return andParts;
+  const segs = s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (segs.length <= 1) return segs;
+  if (!/\s/.test(segs[0])) {
+    // Surname-first pairs: stitch "Webster" + "J." back together.
+    const out: string[] = [];
+    for (let i = 0; i < segs.length; i += 2) {
+      out.push(segs[i + 1] ? `${segs[i]}, ${segs[i + 1]}` : segs[i]);
+    }
+    return out;
+  }
+  return segs;
+}
+
+/**
+ * Surname of one author entry. A single word before a comma is the
+ * surname ("Webster, J."); otherwise names read given-first and the
+ * surname is the LAST full word ("Jane Webster", "Alexander Smith"),
+ * never the longest one, which used to surface long first names.
+ * Initials and generational suffixes never count as the surname.
+ */
+export function surnameOf(entry: string): string {
+  const trimmed = entry.trim();
+  const comma = trimmed.indexOf(",");
+  // Everything before a comma; the whole entry when there is none.
+  const head = comma > 0 ? trimmed.slice(0, comma).trim() : trimmed;
+  if (comma > 0 && !/\s/.test(head)) return head;
+  const words = head
+    .split(/\s+/)
+    .filter((w) => w.replace(/[.'-]/g, "").length > 1)
+    .filter((w) => !/^(jr|sr|ii|iii|iv)\.?$/i.test(w));
+  return (
+    words[words.length - 1] ?? head.split(/\s+/).filter(Boolean).pop() ?? ""
+  );
+}
+
+/**
+ * Citation-style node label: "Webster 2002" for one author,
+ * "Webster and Watson 2002" for two, "Smith et al. 2005" for three or
+ * more; the title's first words stand in when no author parsed.
+ */
 export function shortLabel(
   authors: string | null,
   year: number | null,
   title: string
 ): string {
-  const first = (authors ?? "").split(/[;,]/)[0]?.trim() ?? "";
-  // "J. Webster" and "Webster J." both reduce to the longest word.
-  const surname =
-    first
-      .split(/\s+/)
-      .filter((w) => w.replace(/\./g, "").length > 1)
-      .sort((a, b) => b.length - a.length)[0] ?? "";
-  const base = surname || title.split(/\s+/).slice(0, 2).join(" ");
+  const entries = authorEntries(authors);
+  const surname = entries.length > 0 ? surnameOf(entries[0]) : "";
+  let base: string;
+  if (!surname) {
+    base = title.split(/\s+/).slice(0, 2).join(" ");
+  } else if (entries.length >= 3) {
+    base = `${surname} et al.`;
+  } else if (entries.length === 2) {
+    const second = surnameOf(entries[1]);
+    base = second ? `${surname} and ${second}` : `${surname} et al.`;
+  } else {
+    base = surname;
+  }
   return year ? `${base} ${year}` : base;
 }
 
@@ -99,8 +163,9 @@ export function sourceKindOf(batch: BatchLite | undefined): SourceKind {
 /**
  * Map the two-stage settled outcomes onto one node status. A candidate
  * is "included" at its furthest settled stage, "excluded" or in
- * "conflict" the moment either stage settles that way, and
- * "screening" while anything is still open or blinded.
+ * "conflict" the moment either stage settles that way (AI prescreen
+ * removals read plain "excluded" here; the records table keeps their
+ * provenance), and "screening" while anything is still open or blinded.
  */
 export function mapStatus(
   recordStatus: string,
@@ -110,7 +175,7 @@ export function mapStatus(
   ftRes: { decision: string } | undefined,
   required: (stage: Stage) => number
 ): MapStatus {
-  if (recordStatus === "prescreen_excluded") return "prescreened";
+  if (recordStatus === "prescreen_excluded") return "excluded";
   const ta = stageStatus(taDecs, taRes ?? null, required("title_abstract"));
   if (ta.kind === "excluded") return "excluded";
   if (ta.kind === "conflict") return "conflict";

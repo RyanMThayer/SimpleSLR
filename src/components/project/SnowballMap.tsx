@@ -57,7 +57,6 @@ const PALETTE = {
   light: {
     included: "#059669",
     excluded: "#dc2626",
-    prescreened: "#8b5cf6",
     screening: "#0284c7",
     ink: "#18181b",
     edge: "#a8a29e",
@@ -68,7 +67,6 @@ const PALETTE = {
   dark: {
     included: "#059669",
     excluded: "#ef4444",
-    prescreened: "#8b5cf6",
     screening: "#0284c7",
     ink: "#fafafa",
     edge: "#52525b",
@@ -84,7 +82,6 @@ const STATUS_LABEL: Record<MapStatus, string> = {
   excluded: "excluded",
   conflict: "conflict",
   screening: "not screened yet",
-  prescreened: "AI prescreened",
 };
 
 const SOURCE_LABEL: Record<SourceKind, string> = {
@@ -213,7 +210,6 @@ export default function SnowballMap({ project }: { project: Project }) {
     excluded: true,
     conflict: true,
     screening: true,
-    prescreened: true,
   });
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -624,7 +620,6 @@ export default function SnowballMap({ project }: { project: Project }) {
       excluded: 0,
       conflict: 0,
       screening: 0,
-      prescreened: 0,
     };
     let seeds = 0;
     let backward = 0;
@@ -717,7 +712,6 @@ export default function SnowballMap({ project }: { project: Project }) {
     "excluded",
     "conflict",
     "screening",
-    "prescreened",
   ];
 
   return (
