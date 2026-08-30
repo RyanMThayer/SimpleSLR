@@ -149,11 +149,17 @@ export async function POST(req: Request) {
   const projectId = body?.projectId;
   const recordId = body?.recordId;
   const apiKey = body?.apiKey?.trim();
-  const model = body?.model && MODEL_PROVIDERS[body.model] ? body.model : null;
   const mode = body?.mode === "validate" ? "validate" : "live";
-  if (!projectId || !recordId || !apiKey || !model) {
+  if (!projectId || !recordId || !apiKey) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  // The prescreen's models are prescribed, never client-chosen: the
+  // provider of each relayed key decides, and any model field a stale
+  // client sends is ignored. Every project screens with the same
+  // instrument, so results stay comparable and reportable.
+  const model = apiKey.startsWith("sk-ant-")
+    ? "claude-sonnet-5"
+    : "gpt-5.6-terra";
   const secondApiKey = body?.secondApiKey?.trim() || null;
   const partner = secondApiKey ? partnerModelFor(model) : null;
 

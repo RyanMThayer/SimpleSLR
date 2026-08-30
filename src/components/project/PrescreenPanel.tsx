@@ -2,13 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import {
-  AI_MODELS,
-  keyStoreFor,
-  partnerModelFor,
-  providerOf,
-  type AiModelId,
-} from "@/lib/aiModels";
+import { keyStoreFor, modelLabel, prescreenPlan } from "@/lib/aiModels";
 import { requiredFor, settledOutcome } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import type { Project } from "@/lib/types";
@@ -16,14 +10,16 @@ import type { Project } from "@/lib/types";
 /**
  * The AI prescreen runner: diverts only unmistakably ineligible
  * records away from human screening, using a deterministic ensemble
- * (three procedural framings, plus two more on a cross provider
- * partner model when its key is saved). Unanimity required; everything
- * else stays with humans. Validate mode replays the same pipeline on
+ * of five procedural framings. Unanimity required; everything else
+ * stays with humans. Validate mode replays the same pipeline on
  * records the team already screened and reports what it WOULD have
  * done, without touching anything.
+ *
+ * There is no model picker: the prescreen runs on prescribed models
+ * chosen by which provider keys are saved (see prescreenPlan), so
+ * every team screens with the same instrument and quality never
+ * hinges on a bargain model choice.
  */
-
-const PRESCREEN_MODEL_STORE = "simpleslr-prescreen-model";
 
 type Progress = { done: number; total: number };
 
@@ -35,9 +31,8 @@ export default function PrescreenPanel({
   onDone: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [model, setModel] = useState<AiModelId>("claude-sonnet-5");
-  const [hasKey, setHasKey] = useState(false);
-  const [hasPartnerKey, setHasPartnerKey] = useState(false);
+  const [hasAnthropic, setHasAnthropic] = useState(false);
+  const [hasOpenai, setHasOpenai] = useState(false);
   const [running, setRunning] = useState<"live" | "validate" | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -142,42 +137,17 @@ export default function PrescreenPanel({
   useEffect(() => {
     if (!open) return;
     try {
-      const stored = localStorage.getItem(PRESCREEN_MODEL_STORE);
-      if (stored && AI_MODELS.some((m) => m.id === stored)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setModel(stored as AiModelId);
-      }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHasAnthropic(Boolean(localStorage.getItem(keyStoreFor("anthropic"))));
+      setHasOpenai(Boolean(localStorage.getItem(keyStoreFor("openai"))));
     } catch {
-      // Default stands.
+      setHasAnthropic(false);
+      setHasOpenai(false);
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    try {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHasKey(Boolean(localStorage.getItem(keyStoreFor(providerOf(model)))));
-      setHasPartnerKey(
-        Boolean(
-          localStorage.getItem(
-            keyStoreFor(providerOf(partnerModelFor(model)))
-          )
-        )
-      );
-    } catch {
-      setHasKey(false);
-      setHasPartnerKey(false);
-    }
-  }, [open, model]);
-
-  function chooseModel(id: AiModelId) {
-    setModel(id);
-    try {
-      localStorage.setItem(PRESCREEN_MODEL_STORE, id);
-    } catch {
-      // Session only.
-    }
-  }
+  // Which model(s) this run uses follows from the saved keys alone.
+  const plan = prescreenPlan(hasAnthropic, hasOpenai);
 
   async function candidateIds(mode: "live" | "validate"): Promise<string[]> {
     const supabase = createClient();
@@ -216,17 +186,30 @@ export default function PrescreenPanel({
     stopRef.current = false;
     let apiKey = "";
     let secondApiKey: string | null = null;
-    try {
-      apiKey = localStorage.getItem(keyStoreFor(providerOf(model))) ?? "";
-      secondApiKey = localStorage.getItem(
-        keyStoreFor(providerOf(partnerModelFor(model)))
+    if (!plan) {
+      setError(
+        "No API key is saved in this browser; add an Anthropic or OpenAI key under Project settings."
       );
+      return;
+    }
+    try {
+      apiKey =
+        localStorage.getItem(
+          keyStoreFor(plan.primary.startsWith("claude") ? "anthropic" : "openai")
+        ) ?? "";
+      secondApiKey = plan.partner
+        ? localStorage.getItem(
+            keyStoreFor(
+              plan.partner.startsWith("claude") ? "anthropic" : "openai"
+            )
+          )
+        : null;
     } catch {
       /* handled below */
     }
     if (!apiKey) {
       setError(
-        `No ${providerOf(model) === "anthropic" ? "Anthropic" : "OpenAI"} API key is saved in this browser; add one under Project settings.`
+        "The saved API key could not be read from this browser; check Project settings."
       );
       return;
     }
@@ -291,7 +274,7 @@ export default function PrescreenPanel({
             projectId: project.id,
             recordId: ids[i],
             apiKey,
-            model,
+            model: plan.primary,
             secondApiKey: secondApiKey || undefined,
             mode,
           }),
@@ -438,40 +421,26 @@ export default function PrescreenPanel({
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Model
-                <select
-                  value={model}
-                  onChange={(e) => chooseModel(e.target.value as AiModelId)}
-                  disabled={running !== null}
-                  className="h-8 rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                >
-                  {AI_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {hasPartnerKey
-                  ? `Five procedures vote, split across ${model} and ${partnerModelFor(model)} (cross provider); unanimity removes.`
-                  : `Five procedures vote on ${model}; unanimity removes. Save the other provider's key to split them across two models.`}
-              </span>
-            </div>
+            {plan && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {plan.partner
+                  ? `The prescreen runs on its prescribed models: five procedures vote, split across ${modelLabel(plan.primary)} and ${modelLabel(plan.partner)} (cross provider); unanimity removes.`
+                  : `The prescreen runs on its prescribed model for your saved key: five procedures vote on ${modelLabel(plan.primary)}; unanimity removes. Saving the other provider's key splits the vote across both providers.`}
+              </p>
+            )}
 
-            {!hasKey && (
+            {!plan && (
               <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
-                No API key for this model&apos;s provider is saved in this
-                browser. Add one under Project settings.
+                No API key is saved in this browser. Add an Anthropic or
+                OpenAI key under Project settings; the prescreen picks its
+                models from the provider of the key you save.
               </p>
             )}
 
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => run("validate")}
-                disabled={running !== null || !hasKey || !setupSaved}
+                disabled={running !== null || !plan || !setupSaved}
                 className={btn}
                 title="Dry run on records your team already screened: reports what the prescreen WOULD have removed and whether any human include would have been lost. Changes nothing."
               >
@@ -479,7 +448,7 @@ export default function PrescreenPanel({
               </button>
               <button
                 onClick={() => run("live")}
-                disabled={running !== null || !hasKey || !setupSaved}
+                disabled={running !== null || !plan || !setupSaved}
                 className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
                 title="Evaluates every unscreened record; unanimously ineligible ones move out of the screening queues."
               >

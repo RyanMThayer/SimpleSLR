@@ -73,3 +73,29 @@ export function keyStoreFor(provider: AiProvider): string {
 export function partnerModelFor(primary: string): AiModelId {
   return providerOf(primary) === "anthropic" ? "gpt-5.6-terra" : "claude-sonnet-5";
 }
+
+/**
+ * The prescreen's prescribed instrument. Users choose a PROVIDER by
+ * saving its key, never a model: every run uses the same fixed
+ * mid-tier models, so results are cohesive across teams and nobody
+ * can pin a bad screen on a bargain model choice. With both keys the
+ * five procedures split across providers, Anthropic primary.
+ */
+export function prescreenPlan(
+  hasAnthropic: boolean,
+  hasOpenai: boolean
+): { primary: AiModelId; partner: AiModelId | null } | null {
+  if (hasAnthropic) {
+    return {
+      primary: "claude-sonnet-5",
+      partner: hasOpenai ? "gpt-5.6-terra" : null,
+    };
+  }
+  if (hasOpenai) return { primary: "gpt-5.6-terra", partner: null };
+  return null;
+}
+
+/** Display label for a model id ("claude-sonnet-5" -> "Claude Sonnet 5"). */
+export function modelLabel(id: string): string {
+  return AI_MODELS.find((m) => m.id === id)?.label ?? id;
+}
