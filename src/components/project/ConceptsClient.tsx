@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
-import { requiredFor, settledOutcome } from "@/lib/outcomes";
+import { awaitingTeammates, requiredFor, settledOutcome } from "@/lib/outcomes";
+import AwaitingNote from "@/components/project/AwaitingNote";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import {
@@ -49,6 +50,10 @@ export default function ConceptsClient({
 
   const [records, setRecords] = useState<RecordRow[] | null>(null);
   const [ftIncluded, setFtIncluded] = useState<Set<string>>(new Set());
+  // Papers mid independent screening quota: hidden from the reading
+  // set (title/abstract) or just from the included rows (full text).
+  const [awaitingTa, setAwaitingTa] = useState(0);
+  const [awaitingFt, setAwaitingFt] = useState(0);
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [tags, setTags] = useState<ConceptTag[]>([]);
   const [excerpts, setExcerpts] = useState<ConceptExcerpt[]>([]);
@@ -147,6 +152,29 @@ export default function ConceptsClient({
       setRecords(recs);
       setFtIncluded(ftSet);
       setRowFilter(ftSet.size > 0 ? "included" : "reading");
+
+      const waitIds = awaitingTeammates({
+        ta: byRecord,
+        ft: ftByRecord,
+        resolutionFor: (stage, id) => resMap.get(resKey(stage, id)),
+        taRequired: requiredFor(project, "title_abstract"),
+        ftRequired: requiredFor(project, "full_text"),
+      });
+      // Full text waiters are title/abstract includes, so the active
+      // fetch above already vetted them; title/abstract waiters need
+      // their own liveness check.
+      const recIds = new Set(recs.map((r) => r.id));
+      setAwaitingFt(waitIds.ft.filter((id) => recIds.has(id)).length);
+      let taLive = 0;
+      for (let i = 0; i < waitIds.ta.length; i += 100) {
+        const { data } = await supabase
+          .from("records")
+          .select("id")
+          .eq("status", "active")
+          .in("id", waitIds.ta.slice(i, i + 100));
+        taLive += (data ?? []).length;
+      }
+      setAwaitingTa(taLive);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load papers.");
@@ -1019,6 +1047,10 @@ export default function ConceptsClient({
         <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           Matrix ({shownRecords.length} papers)
         </h2>
+        <AwaitingNote
+          count={rowFilter === "included" ? awaitingTa + awaitingFt : awaitingTa}
+          className="-mt-1 mb-3"
+        />
         {records === null ? (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading...</p>
         ) : shownRecords.length === 0 ? (

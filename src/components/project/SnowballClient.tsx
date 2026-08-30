@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
-import { requiredFor, settledOutcome } from "@/lib/outcomes";
+import { awaitingTeammates, requiredFor, settledOutcome } from "@/lib/outcomes";
+import AwaitingNote from "@/components/project/AwaitingNote";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import SnowballMap from "@/components/project/SnowballMap";
 import { authorTokens, normalizeDoi, normalizeTitle, sharesAuthor } from "@/lib/normalize";
@@ -52,6 +53,7 @@ export default function SnowballClient({
 }) {
   const projectId = project.id;
   const [seeds, setSeeds] = useState<RecordRow[] | null>(null);
+  const [awaitingCount, setAwaitingCount] = useState(0);
   const [selectedSeeds, setSelectedSeeds] = useState<Set<string>>(new Set());
   const [dirBack, setDirBack] = useState(true);
   const [dirFwd, setDirFwd] = useState(true);
@@ -137,6 +139,27 @@ export default function SnowballClient({
             ) === "included"
         )
         .map(([id]) => id);
+
+      // Seeds must settle, so a paper one teammate opinion short of
+      // its quota is absent; count those so the pool explains itself.
+      const waitIds = awaitingTeammates({
+        ta: taByRecord,
+        ft: ftByRecord,
+        resolutionFor: (stage, id) => resMap.get(resKey(stage, id)),
+        taRequired: taReq,
+        ftRequired: ftReq,
+      });
+      const allWait = [...waitIds.ta, ...waitIds.ft];
+      let liveWait = 0;
+      for (let i = 0; i < allWait.length; i += 100) {
+        const { data } = await supabase
+          .from("records")
+          .select("id")
+          .eq("status", "active")
+          .in("id", allWait.slice(i, i + 100));
+        liveWait += (data ?? []).length;
+      }
+      setAwaitingCount(liveWait);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return;
@@ -809,11 +832,15 @@ export default function SnowballClient({
         {seeds === null ? (
           <p className="text-sm text-zinc-500">Loading included records...</p>
         ) : seeds.length === 0 ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            No papers are included after full text screening yet. Webster and
-            Watson snowball from the included set, so finish full text
-            screening first; newly included papers then appear here as seeds.
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              No papers are included after full text screening yet. Webster
+              and Watson snowball from the included set, so finish full text
+              screening first; newly included papers then appear here as
+              seeds.
+            </p>
+            <AwaitingNote count={awaitingCount} />
+          </div>
         ) : (
           <div className="mb-3 flex flex-col gap-1">
             {seeds.map((s) => (
@@ -851,6 +878,7 @@ export default function SnowballClient({
                 </button>
               </label>
             ))}
+            <AwaitingNote count={awaitingCount} className="mt-1" />
           </div>
         )}
         <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-700 dark:text-zinc-300">

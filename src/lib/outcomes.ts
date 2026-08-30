@@ -97,3 +97,50 @@ export function settledOutcome(
   if (s.kind === "conflict") return "conflict";
   return s.kind;
 }
+
+/**
+ * Records sitting mid independent screening: opinions recorded but the
+ * stage's quota not yet met. Views gated on settled outcomes (reading
+ * room, concept matrix, snowball seeds) surface these counts so a
+ * reviewer who already screened a paper knows it is waiting on
+ * teammates, not lost. `ta` holds records still collecting
+ * title/abstract opinions; `ft` holds settled title/abstract includes
+ * still collecting full text opinions. Both are empty by construction
+ * when every stage requires a single opinion.
+ */
+export function awaitingTeammates(input: {
+  ta: Map<string, { decision: Decision | string }[]>;
+  ft: Map<string, { decision: Decision | string }[]>;
+  resolutionFor: (
+    stage: Stage,
+    recordId: string
+  ) => { decision: Decision | string } | undefined;
+  taRequired: number;
+  ftRequired: number;
+}): { ta: string[]; ft: string[] } {
+  const taIds: string[] = [];
+  const ftIds: string[] = [];
+  for (const [id, decs] of input.ta) {
+    const ta = stageStatus(
+      decs,
+      input.resolutionFor("title_abstract", id) ?? null,
+      input.taRequired
+    );
+    if (ta.kind === "awaiting") {
+      taIds.push(id);
+      continue;
+    }
+    if (ta.kind !== "included") continue;
+    const ftDecs = input.ft.get(id);
+    // No full text opinions yet is the ordinary queue state, not a
+    // teammate wait.
+    if (!ftDecs || ftDecs.length === 0) continue;
+    const ft = stageStatus(
+      ftDecs,
+      input.resolutionFor("full_text", id) ?? null,
+      input.ftRequired
+    );
+    if (ft.kind === "awaiting") ftIds.push(id);
+  }
+  return { ta: taIds, ft: ftIds };
+}

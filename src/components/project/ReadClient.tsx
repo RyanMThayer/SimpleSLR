@@ -10,10 +10,12 @@ import {
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
+  awaitingTeammates,
   decisionsByRecord,
   requiredFor,
   settledOutcome,
 } from "@/lib/outcomes";
+import AwaitingNote from "@/components/project/AwaitingNote";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { signedFulltextUrl } from "@/lib/fulltext";
 import { buildAnchor, findAnchor, snapToWords } from "@/lib/anchors";
@@ -550,6 +552,7 @@ export default function ReadClient({
   userId: string;
 }) {
   const [papers, setPapers] = useState<RecordRow[] | null>(null);
+  const [awaitingCount, setAwaitingCount] = useState(0);
   const [recIdx, setRecIdx] = useState(0);
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [tags, setTags] = useState<ConceptTag[]>([]);
@@ -641,6 +644,29 @@ export default function ReadClient({
             ) === "included"
         )
         .map(([id]) => id);
+
+      // Papers a reviewer already screened that still sit below their
+      // opinion quota would otherwise vanish from this room without a
+      // trace; count them so the UI can say they are waiting.
+      const waitIds = awaitingTeammates({
+        ta: taMap,
+        ft: ftMap,
+        resolutionFor: (stage, id) => resMap.get(resKey(stage, id)),
+        taRequired: taReq,
+        ftRequired: ftReq,
+      });
+      const allWait = [...waitIds.ta, ...waitIds.ft];
+      let liveWait = 0;
+      for (let i = 0; i < allWait.length; i += 100) {
+        const { data } = await supabase
+          .from("records")
+          .select("id")
+          .eq("project_id", project.id)
+          .eq("status", "active")
+          .in("id", allWait.slice(i, i + 100));
+        liveWait += (data ?? []).length;
+      }
+      setAwaitingCount(liveWait);
 
       const recs: RecordRow[] = [];
       for (let i = 0; i < includedIds.length; i += 100) {
@@ -1646,9 +1672,12 @@ export default function ReadClient({
           The reading list holds the studies included after full text
           screening, and none exist yet. Finish full text screening first;
           included papers appear here automatically.
+          <AwaitingNote count={awaitingCount} className="mt-2" />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <AwaitingNote count={awaitingCount} />
+          <div className="flex min-h-0 flex-1 gap-4">
           {/* ---------------- Paper viewport ---------------- */}
           <div
             ref={viewportRef}
@@ -2139,6 +2168,7 @@ export default function ReadClient({
               })}
             </div>
           </aside>
+          </div>
         </div>
       )}
 
