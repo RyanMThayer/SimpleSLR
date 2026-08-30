@@ -50,7 +50,12 @@ async function callDet(
   apiKey: string,
   system: string,
   user: string
-): Promise<{ text?: string; modelVersion?: string; error?: string }> {
+): Promise<{
+  text?: string;
+  modelVersion?: string;
+  error?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}> {
   const provider = MODEL_PROVIDERS[model];
   try {
     if (provider === "anthropic") {
@@ -72,6 +77,7 @@ async function callDet(
       const data = (await res.json().catch(() => null)) as {
         model?: string;
         content?: { type: string; text?: string }[];
+        usage?: { input_tokens?: number; output_tokens?: number };
         error?: { message?: string };
       } | null;
       if (!res.ok) {
@@ -88,6 +94,10 @@ async function callDet(
           .map((b) => b.text ?? "")
           .join(""),
         modelVersion: data?.model,
+        usage: {
+          inputTokens: data?.usage?.input_tokens ?? 0,
+          outputTokens: data?.usage?.output_tokens ?? 0,
+        },
       };
     }
     // OpenAI; some models reject sampling params, so retry bare once.
@@ -117,6 +127,7 @@ async function callDet(
       model?: string;
       system_fingerprint?: string;
       choices?: { message?: { content?: string | null } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
       error?: { message?: string };
     } | null;
     if (!res.ok) {
@@ -132,6 +143,10 @@ async function callDet(
       modelVersion: [data?.model, data?.system_fingerprint]
         .filter(Boolean)
         .join(" "),
+      usage: {
+        inputTokens: data?.usage?.prompt_tokens ?? 0,
+        outputTokens: data?.usage?.completion_tokens ?? 0,
+      },
     };
   } catch {
     return { error: `Could not reach the ${provider} API.` };
@@ -252,6 +267,21 @@ export async function POST(req: Request) {
   );
 
   const runId = crypto.randomUUID();
+  // Billed tokens of every FRESH call this evaluation makes, per
+  // model, relayed to the client so it can learn a per-record cost
+  // average for the estimate (replayed ledger votes cost nothing and
+  // report nothing).
+  const usage = new Map<string, { inputTokens: number; outputTokens: number }>();
+  const addUsage = (
+    m: string,
+    u?: { inputTokens: number; outputTokens: number }
+  ) => {
+    if (!u) return;
+    const cur = usage.get(m) ?? { inputTokens: 0, outputTokens: 0 };
+    cur.inputTokens += u.inputTokens;
+    cur.outputTokens += u.outputTokens;
+    usage.set(m, cur);
+  };
   if (missing.length > 0) {
     // Criteria-blind extraction per model, reused when stored.
     const modelsNeeded = [...new Set(missing.map((m) => m.model))];
@@ -276,6 +306,7 @@ export async function POST(req: Request) {
           extractionPrompt(),
           `Title: ${rec.title}\n\nAbstract: ${rec.abstract?.trim() || "(no abstract available)"}`
         );
+        addUsage(m, call.usage);
         const facts = call.text ? parseExtraction(call.text) : null;
         factsByModel.set(m, facts);
         if (facts) {
@@ -316,6 +347,7 @@ export async function POST(req: Request) {
                 factsByModel.get(slot.model) ?? null
               )
         );
+        addUsage(slot.model, call.usage);
         // Evidence must be verbatim from the text this voter was shown:
         // title plus abstract normally, title plus extraction for the
         // facts framing (its abstract is withheld by design).
@@ -395,6 +427,7 @@ export async function POST(req: Request) {
         ),
         voteUserPrompt(rec.title, rec.abstract, null)
       );
+      addUsage(model, call.usage);
       // Fail open: a failed or unparseable veto call keeps the record.
       const veto = call.text
         ? parseVeto(call.text)
@@ -442,6 +475,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     excluded,
+    usage: Object.fromEntries(usage),
     votes: votes.map((v) => ({
       framing: v.framing,
       model: v.model,

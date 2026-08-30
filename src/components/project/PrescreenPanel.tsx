@@ -3,6 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { keyStoreFor, modelLabel, prescreenPlan } from "@/lib/aiModels";
+import {
+  PRESCREEN_CALIB_STORE,
+  addSample,
+  estimateRun,
+  formatCost,
+  parseCalib,
+  type PrescreenCalib,
+} from "@/lib/prescreenCost";
 import { requiredFor, settledOutcome } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import type { Project } from "@/lib/types";
@@ -36,6 +44,9 @@ export default function PrescreenPanel({
   const [running, setRunning] = useState<"live" | "validate" | null>(null);
   const [prescreenedCount, setPrescreenedCount] = useState(0);
   const [restoring, setRestoring] = useState(false);
+  const [unscreenedCount, setUnscreenedCount] = useState<number | null>(null);
+  // Per-model tokens-per-record averages learned from real runs.
+  const [calib, setCalib] = useState<PrescreenCalib>({});
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +157,11 @@ export default function PrescreenPanel({
       setHasAnthropic(false);
       setHasOpenai(false);
     }
+    try {
+      setCalib(parseCalib(localStorage.getItem(PRESCREEN_CALIB_STORE)));
+    } catch {
+      // Estimate falls back to the measured defaults.
+    }
     (async () => {
       const supabase = createClient();
       const { count } = await supabase
@@ -154,7 +170,10 @@ export default function PrescreenPanel({
         .eq("project_id", project.id)
         .eq("status", "prescreen_excluded");
       setPrescreenedCount(count ?? 0);
+      setUnscreenedCount((await candidateIds("live")).length);
     })();
+    // candidateIds reads only stable project identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project.id]);
 
   // Bulk undo: puts every AI-removed record back into screening in one
@@ -179,6 +198,7 @@ export default function PrescreenPanel({
     setSummary(
       `Restored ${prescreenedCount} prescreened record(s) to screening; rerun the prescreen to re-evaluate them.`
     );
+    setUnscreenedCount((c) => (c === null ? null : c + prescreenedCount));
     setPrescreenedCount(0);
     onDone();
   }
@@ -300,6 +320,12 @@ export default function PrescreenPanel({
     let skipped = 0;
     let failed = 0;
     let missedIncludes = 0;
+    // Fold each record's billed tokens into the per-model averages;
+    // records replayed from the ledger report no usage and add no
+    // sample. The floor keeps stray partial retries (a single missing
+    // vote refilled) from dragging the per-record average down.
+    let cal: PrescreenCalib = calib;
+    let calChanged = false;
     setProgress({ done: 0, total: ids.length });
     for (let i = 0; i < ids.length; i++) {
       if (stopRef.current) break;
@@ -317,6 +343,19 @@ export default function PrescreenPanel({
           }),
         });
         const data = await res.json().catch(() => null);
+        if (data?.usage) {
+          for (const [m, u] of Object.entries(
+            data.usage as Record<
+              string,
+              { inputTokens: number; outputTokens: number }
+            >
+          )) {
+            if ((u?.inputTokens ?? 0) >= 1500) {
+              cal = addSample(cal, m, u.inputTokens, u.outputTokens);
+              calChanged = true;
+            }
+          }
+        }
         if (!data || data.error) failed++;
         else if (data.skipped) skipped++;
         else if (data.excluded) {
@@ -329,6 +368,17 @@ export default function PrescreenPanel({
         failed++;
       }
       setProgress({ done: i + 1, total: ids.length });
+    }
+    if (calChanged) {
+      setCalib(cal);
+      try {
+        localStorage.setItem(PRESCREEN_CALIB_STORE, JSON.stringify(cal));
+      } catch {
+        // Session-only calibration.
+      }
+    }
+    if (mode === "live") {
+      setUnscreenedCount((await candidateIds("live")).length);
     }
     setRunning(null);
     const stopNote = stopRef.current ? " (stopped early)" : "";
@@ -464,6 +514,23 @@ export default function PrescreenPanel({
                   ? `The prescreen runs on its prescribed models: five procedures vote, split across ${modelLabel(plan.primary)} and ${modelLabel(plan.partner)} (cross provider). Removal requires unanimous votes citing the same criterion with verbatim evidence, then survives a final plausibility check.`
                   : `The prescreen runs on its prescribed model for your saved key: five procedures vote on ${modelLabel(plan.primary)}. Removal requires unanimous votes citing the same criterion with verbatim evidence, then survives a final plausibility check. Saving the other provider's key splits the vote across both providers.`}
               </p>
+            )}
+
+            {plan && unscreenedCount !== null && unscreenedCount > 0 && (
+              (() => {
+                const est = estimateRun(calib, plan, unscreenedCount);
+                return (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Estimated cost: {formatCost(est.total)} for the{" "}
+                    {unscreenedCount} unscreened record(s), at{" "}
+                    {formatCost(est.perRecord)} per record
+                    {est.learned
+                      ? ", learned from your own runs"
+                      : " (typical; your runs refine this)"}
+                    .
+                  </p>
+                );
+              })()
             )}
 
             {!plan && (
