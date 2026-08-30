@@ -282,6 +282,9 @@ export default function ScreenClient({
   const [editingLabel, setEditingLabel] = useState("");
   const [editingReasonKey, setEditingReasonKey] = useState("");
   const [editConfirm, setEditConfirm] = useState<EditConfirm | null>(null);
+  // After any criteria change: the count of AI-prescreened records
+  // whose removal now rests on outdated criteria, offered for restore.
+  const [aiRevert, setAiRevert] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -868,7 +871,7 @@ export default function ScreenClient({
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-      if (editConfirm || incDelete || incEditConfirm) return; // a dialog is open
+      if (editConfirm || incDelete || incEditConfirm || aiRevert !== null) return; // a dialog is open
 
       const k = e.key.toLowerCase();
       if (e.key === "ArrowRight") {
@@ -901,7 +904,7 @@ export default function ScreenClient({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reasons, incCodes, decide, undo, goNext, goPrev, markNoAccess, editConfirm, incDelete, incEditConfirm, stage]);
+  }, [reasons, incCodes, decide, undo, goNext, goPrev, markNoAccess, editConfirm, incDelete, incEditConfirm, aiRevert, stage]);
 
   // ----- criteria editing -----
 
@@ -920,6 +923,7 @@ export default function ScreenClient({
       return;
     }
     setCriteriaEditing(false);
+    offerAiRevert();
   }
 
   // ----- reason management -----
@@ -931,6 +935,33 @@ export default function ScreenClient({
       .select("id", { count: "exact", head: true })
       .eq("reason_id", reasonId);
     return count ?? 0;
+  }
+
+  // Editing criteria invalidates the AI prescreen's stored votes (the
+  // criteria hash no longer matches, so a rerun re-judges), but the
+  // records it already removed STAY removed until someone restores
+  // them. So after any criteria change, offer that restore explicitly,
+  // mirroring the keep-or-requeue question human decisions get.
+  async function offerAiRevert() {
+    const supabase = createClient();
+    const { count } = await supabase
+      .from("records")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", project.id)
+      .eq("status", "prescreen_excluded");
+    if ((count ?? 0) > 0) setAiRevert(count ?? 0);
+  }
+
+  async function aiRevertRestore() {
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({ status: "active" })
+      .eq("project_id", project.id)
+      .eq("status", "prescreen_excluded");
+    if (upErr) setError(upErr.message);
+    setAiRevert(null);
+    load();
   }
 
   // ----- inclusion code management -----
@@ -1178,6 +1209,7 @@ export default function ScreenClient({
       return;
     }
     load();
+    offerAiRevert();
   }
 
   async function requestEditSave(r: ExclusionReason) {
@@ -1221,6 +1253,7 @@ export default function ScreenClient({
       }
       setEditingReasonId(null);
       load();
+      offerAiRevert();
       return;
     }
     setEditConfirm({ reasonId: r.id, newLabel, affected });
@@ -1246,6 +1279,7 @@ export default function ScreenClient({
     setEditConfirm(null);
     setEditingReasonId(null);
     load();
+    offerAiRevert();
   }
 
   const pct = mineTotal > 0 ? Math.round((mineDone / mineTotal) * 100) : 0;
@@ -2274,6 +2308,38 @@ export default function ScreenClient({
       )}
 
       {/* ---------------- Edit impact dialog ---------------- */}
+      {aiRevert !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+            <h3 className="mb-2 font-semibold text-zinc-900 dark:text-zinc-50">
+              The AI prescreen used the previous criteria
+            </h3>
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+              {aiRevert} record(s) are currently removed by the AI
+              prescreen based on the criteria before this change. Its
+              stored votes no longer apply; a rerun judges against the
+              new wording, but removed records stay removed until
+              restored. Restoring puts them back into screening for
+              re-evaluation.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={aiRevertRestore}
+                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              >
+                Criteria changed: restore the {aiRevert} record(s)
+              </button>
+              <button
+                onClick={() => setAiRevert(null)}
+                className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Small fix: keep them removed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
           <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
