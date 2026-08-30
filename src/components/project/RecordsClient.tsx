@@ -302,7 +302,10 @@ export default function RecordsClient({
       } else if (status !== "all") {
         query = query.eq("status", status);
       }
-      if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+      if (search.trim()) {
+        const q = search.trim().replace(/[,()]/g, " ").trim();
+        query = query.or(`title.ilike.%${q}%,authors.ilike.%${q}%`);
+      }
       if (batchIds) query = query.in("batch_id", batchIds);
 
       const { data, count, error: qErr } = await query;
@@ -339,7 +342,10 @@ export default function RecordsClient({
         } else if (status !== "all") {
           query = query.eq("status", status);
         }
-        if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
+        if (search.trim()) {
+          const q = search.trim().replace(/[,()]/g, " ").trim();
+          query = query.or(`title.ilike.%${q}%,authors.ilike.%${q}%`);
+        }
         if (batchIds) query = query.in("batch_id", batchIds);
         const { data, error: qErr } = await query;
         if (qErr) {
@@ -1374,7 +1380,7 @@ export default function RecordsClient({
         </h1>
         <input
           className="h-9 w-64 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          placeholder="Search titles..."
+          placeholder="Search titles and authors..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
