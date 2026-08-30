@@ -10,8 +10,10 @@ import {
   extractionPrompt,
   factsUserPrompt,
   parseExtraction,
+  parseVeto,
   parseVote,
   unanimousExclude,
+  vetoPrompt,
   votePrompt,
   voteUserPrompt,
   type Framing,
@@ -233,7 +235,7 @@ export async function POST(req: Request) {
   // current prompt version and criteria hash.
   const { data: stored } = await supabase
     .from("prescreen_votes")
-    .select("framing, model, verdict, criterion, note")
+    .select("framing, model, verdict, criterion, evidence, note")
     .eq("record_id", recordId)
     .eq("prompt_version", PRESCREEN_PROMPT_VERSION)
     .eq("criteria_hash", cHash);
@@ -242,6 +244,7 @@ export async function POST(req: Request) {
     model: string;
     verdict: string;
     criterion: string | null;
+    evidence: string | null;
     note: string | null;
   }[];
   const missing = expected.filter(
@@ -313,13 +316,21 @@ export async function POST(req: Request) {
                 factsByModel.get(slot.model) ?? null
               )
         );
+        // Evidence must be verbatim from the text this voter was shown:
+        // title plus abstract normally, title plus extraction for the
+        // facts framing (its abstract is withheld by design).
+        const shownText =
+          slot.framing === "facts" && factsByModel.get(slot.model)
+            ? `${rec.title}\n${factsByModel.get(slot.model)}`
+            : `${rec.title}\n${rec.abstract ?? ""}`;
         // Fail open: an API error is a pass vote with the error noted.
         const parsed = call.text
-          ? parseVote(call.text, criteriaText)
+          ? parseVote(call.text, criteriaText, shownText)
           : {
               verdict: "pass" as const,
               criterion: null,
               criterionVerified: false,
+              evidence: null,
               note: `model call failed (${call.error ?? "empty response"}); counted as pass`,
             };
         return { slot, parsed, modelVersion: call.modelVersion ?? null };
@@ -334,6 +345,7 @@ export async function POST(req: Request) {
       verdict: parsed.verdict,
       criterion: parsed.criterion,
       criterion_verified: parsed.criterionVerified,
+      evidence: parsed.evidence,
       note: parsed.note,
       prompt_version: PRESCREEN_PROMPT_VERSION,
       criteria_hash: cHash,
@@ -355,15 +367,68 @@ export async function POST(req: Request) {
         model: r.model,
         verdict: r.verdict,
         criterion: r.criterion,
+        evidence: r.evidence,
         note: r.note,
       })
     );
   }
 
-  const excluded = unanimousExclude(
+  // Removal now takes three independent hurdles: unanimity, agreement
+  // on the SAME criterion, and a final adversarial plausibility check.
+  let excluded = unanimousExclude(
     votes,
-    expected.map((e) => ({ framing: e.framing, model: e.model }))
+    expected.map((e) => ({ framing: e.framing, model: e.model })),
+    criteriaText
   );
+  if (excluded) {
+    const storedVeto = votes.find((v) => v.framing === "veto");
+    if (storedVeto) {
+      excluded = storedVeto.verdict === "exclude";
+    } else {
+      const call = await callDet(
+        model,
+        apiKey,
+        vetoPrompt(
+          proj.research_question,
+          proj.inclusion_criteria,
+          exclusionText
+        ),
+        voteUserPrompt(rec.title, rec.abstract, null)
+      );
+      // Fail open: a failed or unparseable veto call keeps the record.
+      const veto = call.text
+        ? parseVeto(call.text)
+        : {
+            allow: false,
+            note: `veto call failed (${call.error ?? "empty response"}); removal vetoed`,
+          };
+      excluded = veto.allow;
+      await supabase.from("prescreen_votes").upsert(
+        [
+          {
+            project_id: projectId,
+            record_id: recordId,
+            framing: "veto",
+            model,
+            model_version: call.modelVersion ?? null,
+            verdict: veto.allow ? "exclude" : "pass",
+            criterion: null,
+            criterion_verified: false,
+            evidence: null,
+            note: veto.note,
+            prompt_version: PRESCREEN_PROMPT_VERSION,
+            criteria_hash: cHash,
+            run_id: runId,
+            created_by: user.id,
+          },
+        ],
+        {
+          onConflict: "record_id,framing,model,prompt_version,criteria_hash",
+          ignoreDuplicates: true,
+        }
+      );
+    }
+  }
   if (excluded && mode === "live") {
     const { error: upErr } = await supabase
       .from("records")

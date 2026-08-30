@@ -42,7 +42,14 @@ import type {
 
 const PAGE_SIZE = 50;
 
-type StatusFilter = "all" | "active" | "duplicate" | "prescreen_excluded";
+/** "live" is the default view: active records with the AI prescreened
+ * ones alongside them (violet chip), so removals stay in sight. */
+type StatusFilter =
+  | "live"
+  | "all"
+  | "active"
+  | "duplicate"
+  | "prescreen_excluded";
 /**
  * Decision filter: top level category, optionally refined to one
  * inclusion code / exclusion reason. The string "any" is the sentinel
@@ -101,7 +108,7 @@ export default function RecordsClient({
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("active");
+  const [status, setStatus] = useState<StatusFilter>("live");
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>({
     kind: "all",
   });
@@ -284,7 +291,11 @@ export default function RecordsClient({
         .eq("project_id", projectId)
         .order("created_at")
         .range(page * pageSize, page * pageSize + pageSize - 1);
-      if (status !== "all") query = query.eq("status", status);
+      if (status === "live") {
+        query = query.in("status", ["active", "prescreen_excluded"]);
+      } else if (status !== "all") {
+        query = query.eq("status", status);
+      }
       if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
       if (batchIds) query = query.in("batch_id", batchIds);
 
@@ -317,7 +328,11 @@ export default function RecordsClient({
           .eq("project_id", projectId)
           .order("created_at")
           .range(from, from + 999);
-        if (status !== "all") query = query.eq("status", status);
+        if (status === "live") {
+          query = query.in("status", ["active", "prescreen_excluded"]);
+        } else if (status !== "all") {
+          query = query.eq("status", status);
+        }
         if (search.trim()) query = query.ilike("title", `%${search.trim()}%`);
         if (batchIds) query = query.in("batch_id", batchIds);
         const { data, error: qErr } = await query;
@@ -1294,9 +1309,10 @@ export default function RecordsClient({
             setPage(0);
           }}
         >
-          <option value="active">Active</option>
+          <option value="live">Active + AI prescreened</option>
+          <option value="active">Active only</option>
+          <option value="prescreen_excluded">AI prescreened only</option>
           <option value="duplicate">Duplicates</option>
-          <option value="prescreen_excluded">Prescreened out</option>
           <option value="all">All statuses</option>
         </select>
         <select

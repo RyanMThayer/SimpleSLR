@@ -424,8 +424,8 @@ export default function PrescreenPanel({
             {plan && (
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 {plan.partner
-                  ? `The prescreen runs on its prescribed models: five procedures vote, split across ${modelLabel(plan.primary)} and ${modelLabel(plan.partner)} (cross provider); unanimity removes.`
-                  : `The prescreen runs on its prescribed model for your saved key: five procedures vote on ${modelLabel(plan.primary)}; unanimity removes. Saving the other provider's key splits the vote across both providers.`}
+                  ? `The prescreen runs on its prescribed models: five procedures vote, split across ${modelLabel(plan.primary)} and ${modelLabel(plan.partner)} (cross provider). Removal requires unanimous votes citing the same criterion with verbatim evidence, then survives a final plausibility check.`
+                  : `The prescreen runs on its prescribed model for your saved key: five procedures vote on ${modelLabel(plan.primary)}. Removal requires unanimous votes citing the same criterion with verbatim evidence, then survives a final plausibility check. Saving the other provider's key splits the vote across both providers.`}
               </p>
             )}
 
