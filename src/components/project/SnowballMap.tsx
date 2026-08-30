@@ -275,6 +275,10 @@ export default function SnowballMap({ project }: { project: Project }) {
           .from("snowball_links")
           .select("record_id, seed_record_id, direction")
           .eq("project_id", project.id)
+          // Creation order makes "which seed found it first" well
+          // defined for the flow view's attribution.
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
           .range(f, t)
       );
       if (links.length === 0) {
@@ -630,20 +634,28 @@ export default function SnowballMap({ project }: { project: Project }) {
     };
     const rows: Row[] = [];
     const seedsOf = new Map<string, Set<string>>();
+    const attributed = new Set<string>();
     edges.forEach((e) => {
       if (!directionPass(e)) return;
       const cand = nodeById.get(e.recordId);
       if (!cand || !statusOn[cand.status]) return;
       if (scope === "ta" && !cand.taIncluded) return;
+      const s = seedsOf.get(e.recordId) ?? new Set<string>();
+      s.add(e.seedId);
+      seedsOf.set(e.recordId, s);
+      // First finder attribution: each paper rides exactly ONE ribbon,
+      // under the seed whose round recorded it first (edges arrive in
+      // link creation order), so every number in this view is a true
+      // unique paper count even when several seeds found the paper.
+      // The map remains the place where shared finds show as such.
+      if (attributed.has(e.recordId)) return;
+      attributed.add(e.recordId);
       rows.push({
         seedId: e.seedId,
         dir: e.direction,
         recordId: e.recordId,
         outcome: cand.status,
       });
-      const s = seedsOf.get(e.recordId) ?? new Set<string>();
-      s.add(e.seedId);
-      seedsOf.set(e.recordId, s);
     });
     type FlowPath = {
       key: string;
@@ -653,7 +665,6 @@ export default function SnowballMap({ project }: { project: Project }) {
       count: number;
     };
     const pathMap = new Map<string, FlowPath>();
-    const outcomePapers = new Map<MapStatus, Set<string>>();
     rows.forEach((r) => {
       const key = `${r.seedId}|${r.dir}|${r.outcome}`;
       const p = pathMap.get(key) ?? {
@@ -665,9 +676,6 @@ export default function SnowballMap({ project }: { project: Project }) {
       };
       p.count++;
       pathMap.set(key, p);
-      const set = outcomePapers.get(r.outcome) ?? new Set<string>();
-      set.add(r.recordId);
-      outcomePapers.set(r.outcome, set);
     });
     const paths = [...pathMap.values()];
     const seedTotals = new Map<string, number>();
@@ -688,7 +696,6 @@ export default function SnowballMap({ project }: { project: Project }) {
     return {
       paths,
       seedOrder,
-      outcomePapers,
       totalLinks: rows.length,
       uniquePapers: seedsOf.size,
       sharedPapers,
@@ -1009,7 +1016,7 @@ export default function SnowballMap({ project }: { project: Project }) {
 
               {layout === "yield" ? (
                 (() => {
-                  const { paths, seedOrder, outcomePapers } = flow;
+                  const { paths, seedOrder } = flow;
                   if (paths.length === 0) {
                     return (
                       <text
@@ -1226,11 +1233,6 @@ export default function SnowballMap({ project }: { project: Project }) {
                             const top = L.y0.get(k) ?? TOPY;
                             const h2 = (L.totals.get(k) ?? 0) * L.unit;
                             const links = L.totals.get(k) ?? 0;
-                            const uniq =
-                              ai === 2
-                                ? (outcomePapers.get(k as MapStatus)?.size ??
-                                  links)
-                                : links;
                             return (
                               <g
                                 key={k}
@@ -1247,9 +1249,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                   setFlowHover(`n:${ai}:${k}`);
                                   setFlowTip([
                                     axisKeyLabel(ai, k),
-                                    ai === 2 && uniq !== links
-                                      ? `${uniq} paper(s) · ${links} path(s)`
-                                      : `${links} paper path(s)`,
+                                    `${links} paper(s)`,
                                   ]);
                                   moveTip(e2);
                                 }}
@@ -1320,7 +1320,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                                     strokeWidth={3}
                                     paintOrder="stroke"
                                   >
-                                    {axisKeyLabel(ai, k)} · {uniq}
+                                    {axisKeyLabel(ai, k)} · {links}
                                   </text>
                                 )}
                               </g>
@@ -1659,7 +1659,7 @@ export default function SnowballMap({ project }: { project: Project }) {
               {layout === "yield"
                 ? `ribbons stream each seed's finds into their outcome${
                     flow.sharedPapers > 0
-                      ? `; ${flow.sharedPapers} paper(s) found by several seeds travel one ribbon per seed`
+                      ? `; ${flow.sharedPapers} paper(s) found by several seeds are counted under the seed that found them first`
                       : ""
                   }`
                 : "arrows point at the cited work"}
