@@ -19,6 +19,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { requiredFor } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
+import { downloadFile, slugify } from "@/lib/export";
 import {
   buildSnowballGraph,
   mapStatus,
@@ -34,19 +35,19 @@ import type { Project, Stage } from "@/lib/types";
 
 /**
  * The citation map: every snowball round drawn as one consolidated
- * graph. Seeds anchor the layout; candidates cluster around whichever
- * seeds produced them, and a paper surfaced by several seeds sits
- * between them with an edge to each. Color = screening status (the
- * settled, blind-safe outcome), shape = how the record entered
- * (OpenAlex, a database export file, or manual entry), size = how many
- * seeds corroborate it, ring = seed. Backward edges are solid (the
- * seed cites it), forward edges are dashed (it cites the seed).
+ * graph. One node per paper regardless of how many seeds or import
+ * routes found it; shape tells the route (circle OpenAlex, rounded
+ * square export file, diamond manual), color tells the settled,
+ * blind-safe screening status, size grows with seed corroboration,
+ * and an ink ring marks seeds. Curved edges carry an arrowhead that
+ * always points at the CITED work: solid from a seed to a reference
+ * (backward), dashed from a citing paper to its seed (forward).
  *
- * Palette validated for light and dark surfaces and color vision
- * deficiency (conflict is drawn as a split emerald/red node rather
- * than a third red-adjacent hue); status is never color alone: the
- * legend, tooltips, and the detail panel restate it in words, and the
- * records table remains the tabular fallback.
+ * Palette validated (CVD + contrast, light and dark surfaces);
+ * conflict is a split emerald/red node rather than a red-adjacent
+ * third hue, and every encoding is restated in words in the legend,
+ * tooltip, and detail panel. The records table stays the tabular
+ * fallback.
  */
 
 const W = 1200;
@@ -57,29 +58,32 @@ const PALETTE = {
     included: "#059669",
     excluded: "#dc2626",
     prescreened: "#8b5cf6",
-    screening: "#a1a1aa",
+    screening: "#0284c7",
     ink: "#18181b",
-    edge: "#a1a1aa",
+    edge: "#a8a29e",
     label: "#3f3f46",
-    surfaceRing: "#ffffff",
+    surface: "#fafafa",
+    grid: "#d4d4d8",
   },
   dark: {
     included: "#059669",
     excluded: "#ef4444",
     prescreened: "#8b5cf6",
-    screening: "#71717a",
+    screening: "#0284c7",
     ink: "#fafafa",
     edge: "#52525b",
     label: "#a1a1aa",
-    surfaceRing: "#18181b",
+    surface: "#18181b",
+    grid: "#3f3f46",
   },
 };
+type Pal = (typeof PALETTE)["light"];
 
 const STATUS_LABEL: Record<MapStatus, string> = {
   included: "included",
   excluded: "excluded",
   conflict: "conflict",
-  screening: "in screening",
+  screening: "not screened yet",
   prescreened: "AI prescreened",
 };
 
@@ -103,6 +107,94 @@ function useIsDark(): boolean {
   return dark;
 }
 
+function fillOf(n: SnowballNode, pal: Pal): string {
+  return n.status === "conflict" ? pal.included : pal[n.status];
+}
+
+/** Node mark: shape by source, split fill for conflicts, ring for seeds. */
+function NodeShape({ n, pal }: { n: SnowballNode; pal: Pal }) {
+  const r = nodeRadius(n);
+  const fill = fillOf(n, pal);
+  const common = {
+    stroke: n.isSeed ? pal.ink : pal.surface,
+    strokeWidth: n.isSeed ? 2.5 : 1.25,
+  };
+  if (n.status === "conflict") {
+    return (
+      <g>
+        <path
+          d={`M 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} Z`}
+          fill={pal.included}
+          {...common}
+        />
+        <path
+          d={`M 0 ${-r} A ${r} ${r} 0 0 1 0 ${r} Z`}
+          fill={pal.excluded}
+          {...common}
+        />
+      </g>
+    );
+  }
+  if (!n.isSeed && n.source === "file") {
+    const s = r * 1.72;
+    return (
+      <rect
+        x={-s / 2}
+        y={-s / 2}
+        width={s}
+        height={s}
+        rx={3}
+        fill={fill}
+        {...common}
+      />
+    );
+  }
+  if (!n.isSeed && n.source === "manual") {
+    return (
+      <path
+        d={`M 0 ${-r * 1.2} L ${r * 1.2} 0 L 0 ${r * 1.2} L ${-r * 1.2} 0 Z`}
+        fill={fill}
+        {...common}
+      />
+    );
+  }
+  return <circle r={r} fill={fill} {...common} />;
+}
+
+/**
+ * Curved edge path drawn from the CITING paper to the CITED one, bowed
+ * slightly and trimmed so the arrowhead rests at the target's rim.
+ */
+function edgePath(e: SnowballEdge): string | null {
+  const s = e.source as SnowballNode;
+  const t = e.target as SnowballNode;
+  if (typeof s === "string" || typeof t === "string") return null;
+  // backward: seed cites the candidate -> seed(source) to record(target).
+  // forward: the candidate cites the seed -> record to seed.
+  const from = e.direction === "backward" ? s : t;
+  const to = e.direction === "backward" ? t : s;
+  const x1 = from.x ?? 0;
+  const y1 = from.y ?? 0;
+  const x2 = to.x ?? 0;
+  const y2 = to.y ?? 0;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const trimA = nodeRadius(from) + 2;
+  const trimB = nodeRadius(to) + 7;
+  if (len <= trimA + trimB) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const ax = x1 + ux * trimA;
+  const ay = y1 + uy * trimA;
+  const bx = x2 - ux * trimB;
+  const by = y2 - uy * trimB;
+  // Perpendicular bow, 8 percent of the span.
+  const mx = (ax + bx) / 2 - uy * len * 0.08;
+  const my = (ay + by) / 2 + ux * len * 0.08;
+  return `M ${ax} ${ay} Q ${mx} ${my} ${bx} ${by}`;
+}
+
 type Loaded = {
   nodes: SnowballNode[];
   edges: SnowballEdge[];
@@ -112,10 +204,8 @@ export default function SnowballMap({ project }: { project: Project }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
-  // View transform (pan/zoom) and layout mode.
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [layout, setLayout] = useState<"network" | "timeline">("network");
-  // Filters: direction toggles and status toggles (all on by default).
   const [showBackward, setShowBackward] = useState(true);
   const [showForward, setShowForward] = useState(true);
   const [statusOn, setStatusOn] = useState<Record<MapStatus, boolean>>({
@@ -132,12 +222,10 @@ export default function SnowballMap({ project }: { project: Project }) {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [frame, setFrame] = useState(0);
+  const [draggingNode, setDraggingNode] = useState(false);
   const isDark = useIsDark();
   const pal = isDark ? PALETTE.dark : PALETTE.light;
 
-  // Whether a node drag is in flight, mirrored into state only where
-  // render output depends on it (the tooltip suppression).
-  const [draggingNode, setDraggingNode] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const simRef = useRef<ReturnType<
     typeof forceSimulation<SnowballNode, SnowballEdge>
@@ -260,8 +348,7 @@ export default function SnowballMap({ project }: { project: Project }) {
   }, [load]);
 
   // ------------------------------------------------------------------
-  // Layout: seeds on a ring, candidates near their seeds, then a
-  // synchronously settled force simulation (no layout jitter on open).
+  // Layout and framing
   // ------------------------------------------------------------------
   const yearScale = useMemo(() => {
     const years = (data?.nodes ?? [])
@@ -278,20 +365,38 @@ export default function SnowballMap({ project }: { project: Project }) {
     };
   }, [data]);
 
+  const fitView = useCallback(() => {
+    const ns = data?.nodes ?? [];
+    if (ns.length === 0) {
+      setView({ x: 0, y: 0, k: 1 });
+      return;
+    }
+    const pad = 70;
+    const xs = ns.map((n) => n.x ?? 0);
+    const ys = ns.map((n) => n.y ?? 0);
+    const minX = Math.min(...xs) - pad;
+    const maxX = Math.max(...xs) + pad;
+    const minY = Math.min(...ys) - pad;
+    const maxY = Math.max(...ys) + pad;
+    const k = Math.min(2, W / (maxX - minX), H / (maxY - minY));
+    setView({
+      k,
+      x: (W - (minX + maxX) * k) / 2,
+      y: (H - (minY + maxY) * k) / 2,
+    });
+  }, [data]);
+
   useEffect(() => {
     if (!data || data.nodes.length === 0) return;
     const nodes = data.nodes;
     const seeds = nodes.filter((n) => n.isSeed);
-    const bySeed = new Map<string, SnowballNode>(
-      seeds.map((s) => [s.id, s])
-    );
+    const bySeed = new Map<string, SnowballNode>(seeds.map((s) => [s.id, s]));
     seeds.forEach((s, i) => {
       const a = (i / Math.max(1, seeds.length)) * 2 * Math.PI;
       const r = seeds.length > 1 ? Math.min(W, H) / 4 : 0;
       s.x = W / 2 + r * Math.cos(a);
       s.y = H / 2 + r * Math.sin(a);
     });
-    // Candidates start beside one of their seeds, spread on a small ring.
     const firstSeedOf = new Map<string, string>();
     data.edges.forEach((e) => {
       if (!firstSeedOf.has(e.recordId)) firstSeedOf.set(e.recordId, e.seedId);
@@ -300,7 +405,7 @@ export default function SnowballMap({ project }: { project: Project }) {
       .filter((n) => !n.isSeed)
       .forEach((n, i) => {
         const seed = bySeed.get(firstSeedOf.get(n.id) ?? "");
-        const a = (i * 2.399963) % (2 * Math.PI); // golden angle spread
+        const a = (i * 2.399963) % (2 * Math.PI);
         n.x = (seed?.x ?? W / 2) + 90 * Math.cos(a);
         n.y = (seed?.y ?? H / 2) + 90 * Math.sin(a);
       });
@@ -316,9 +421,7 @@ export default function SnowballMap({ project }: { project: Project }) {
       )
       .force(
         "charge",
-        forceManyBody<SnowballNode>().strength((d) =>
-          d.isSeed ? -420 : -70
-        )
+        forceManyBody<SnowballNode>().strength((d) => (d.isSeed ? -420 : -70))
       )
       .force(
         "collide",
@@ -335,34 +438,40 @@ export default function SnowballMap({ project }: { project: Project }) {
         )
       )
       .force("y", forceY<SnowballNode>(H / 2).strength(0.06));
-    // Settle synchronously so the map opens already composed.
     sim.stop();
     for (let i = 0; i < 300; i++) sim.tick();
     sim.on("tick", () => setFrame((f) => f + 1));
     simRef.current = sim;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFrame((f) => f + 1);
+    fitView();
     return () => {
       sim.stop();
     };
-  }, [data, layout, yearScale]);
+  }, [data, layout, yearScale, fitView]);
 
   // ------------------------------------------------------------------
-  // Interaction: pan, zoom, drag; hover and selection.
+  // Interaction
   // ------------------------------------------------------------------
+  const zoomAt = useCallback((factor: number, px: number, py: number) => {
+    setView((v) => {
+      const k = Math.max(0.2, Math.min(5, v.k * factor));
+      return {
+        k,
+        x: px - ((px - v.x) / v.k) * k,
+        y: py - ((py - v.y) / v.k) * k,
+      };
+    });
+  }, []);
+
   function onWheel(e: React.WheelEvent) {
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const k = Math.max(0.25, Math.min(4, view.k * factor));
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
     const px = ((e.clientX - rect.left) / rect.width) * W;
     const py = ((e.clientY - rect.top) / rect.height) * H;
-    // Keep the point under the cursor fixed while zooming.
-    setView((v) => ({
-      k,
-      x: px - ((px - v.x) / v.k) * k,
-      y: py - ((py - v.y) / v.k) * k,
-    }));
+    // Exponential in the wheel delta: fine steps on trackpads, smooth
+    // sweeps on mouse wheels.
+    zoomAt(Math.exp(-e.deltaY * 0.0022), px, py);
   }
 
   function onPointerDown(e: React.PointerEvent, nodeId?: string) {
@@ -387,9 +496,7 @@ export default function SnowballMap({ project }: { project: Project }) {
 
   function onPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
-    if (!d.panning && !d.id) {
-      return;
-    }
+    if (!d.panning && !d.id) return;
     const dx = e.clientX - d.lastX;
     const dy = e.clientY - d.lastY;
     if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
@@ -420,46 +527,66 @@ export default function SnowballMap({ project }: { project: Project }) {
       }
       simRef.current?.alphaTarget(0);
       setDraggingNode(false);
-      if (!d.moved) {
-        setSelectedId((s) => (s === d.id ? null : d.id));
-      }
+      if (!d.moved) setSelectedId((s) => (s === d.id ? null : d.id));
     } else if (d.panning && !d.moved) {
       setSelectedId(null);
     }
-    dragRef.current = { id: null, panning: false, lastX: 0, lastY: 0, moved: false };
+    dragRef.current = {
+      id: null,
+      panning: false,
+      lastX: 0,
+      lastY: 0,
+      moved: false,
+    };
   }
 
   // ------------------------------------------------------------------
-  // Derived visibility
+  // Visibility: direction filters hide the edges AND any candidate
+  // whose every connection is filtered away, so toggling backward or
+  // forward reshapes the graph instead of just fading lines.
   // ------------------------------------------------------------------
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
   const edges = useMemo(() => data?.edges ?? [], [data]);
   const q = search.trim().toLowerCase();
 
-  const nodeVisible = useCallback(
-    (n: SnowballNode) => n.isSeed || statusOn[n.status],
-    [statusOn]
+  const directionPass = useCallback(
+    (e: SnowballEdge) =>
+      e.direction === "backward" ? showBackward : showForward,
+    [showBackward, showForward]
   );
-  const visibleIds = useMemo(
-    () => new Set(nodes.filter(nodeVisible).map((n) => n.id)),
-    [nodes, nodeVisible]
-  );
-  const edgeVisible = (e: SnowballEdge) =>
-    (e.direction === "backward" ? showBackward : showForward) &&
-    visibleIds.has(e.seedId) &&
-    visibleIds.has(e.recordId);
 
-  // Focus: a selected node dims everything outside its neighborhood;
-  // a search dims non-matches.
-  const neighborhood = useMemo(() => {
-    if (!selectedId) return null;
-    const set = new Set<string>([selectedId]);
+  const visibleIds = useMemo(() => {
+    const connected = new Set<string>();
     edges.forEach((e) => {
-      if (e.seedId === selectedId) set.add(e.recordId);
-      if (e.recordId === selectedId) set.add(e.seedId);
+      if (directionPass(e)) {
+        connected.add(e.recordId);
+        connected.add(e.seedId);
+      }
+    });
+    return new Set(
+      nodes
+        .filter(
+          (n) =>
+            (n.isSeed || statusOn[n.status]) &&
+            (n.isSeed || connected.has(n.id))
+        )
+        .map((n) => n.id)
+    );
+  }, [nodes, edges, statusOn, directionPass]);
+
+  const edgeVisible = (e: SnowballEdge) =>
+    directionPass(e) && visibleIds.has(e.seedId) && visibleIds.has(e.recordId);
+
+  const neighborhood = useMemo(() => {
+    const focus = selectedId ?? hoverId;
+    if (!focus) return null;
+    const set = new Set<string>([focus]);
+    edges.forEach((e) => {
+      if (e.seedId === focus) set.add(e.recordId);
+      if (e.recordId === focus) set.add(e.seedId);
     });
     return set;
-  }, [selectedId, edges]);
+  }, [selectedId, hoverId, edges]);
 
   const emphasis = (n: SnowballNode): number => {
     if (q) {
@@ -467,93 +594,87 @@ export default function SnowballMap({ project }: { project: Project }) {
         (n.authors ?? "").toLowerCase().includes(q) ||
         n.label.toLowerCase().includes(q)
         ? 1
-        : 0.14;
+        : 0.13;
     }
-    if (neighborhood) return neighborhood.has(n.id) ? 1 : 0.12;
+    if (selectedId && neighborhood) return neighborhood.has(n.id) ? 1 : 0.12;
     return 1;
+  };
+
+  const edgeEmphasis = (e: SnowballEdge): { opacity: number; width: number } => {
+    const focus = selectedId ?? hoverId;
+    const touches = focus && (e.seedId === focus || e.recordId === focus);
+    if (touches) return { opacity: 0.85, width: 2 };
+    if (focus || q) return { opacity: 0.14, width: 1.2 };
+    return { opacity: 0.4, width: 1.2 };
   };
 
   const selected = selectedId
     ? (nodes.find((n) => n.id === selectedId) ?? null)
     : null;
   const selectedEdges = selected
-    ? edges.filter(
-        (e) => e.seedId === selected.id || e.recordId === selected.id
-      )
+    ? edges.filter((e) => e.seedId === selected.id || e.recordId === selected.id)
     : [];
-  const hovered = hoverId ? (nodes.find((n) => n.id === hoverId) ?? null) : null;
-
-  const fillOf = (n: SnowballNode): string =>
-    n.status === "conflict" ? pal.included : pal[n.status];
+  const hovered = hoverId
+    ? (nodes.find((n) => n.id === hoverId) ?? null)
+    : null;
 
   const counts = useMemo(() => {
-    const c = { seeds: 0, backward: 0, forward: 0, openalex: 0, file: 0, manual: 0 };
+    const status: Record<MapStatus, number> = {
+      included: 0,
+      excluded: 0,
+      conflict: 0,
+      screening: 0,
+      prescreened: 0,
+    };
+    let seeds = 0;
+    let backward = 0;
+    let forward = 0;
     nodes.forEach((n) => {
-      if (n.isSeed) c.seeds++;
-      else if (n.source === "openalex") c.openalex++;
-      else if (n.source === "file") c.file++;
-      else if (n.source === "manual") c.manual++;
+      status[n.status]++;
+      if (n.isSeed) seeds++;
     });
     edges.forEach((e) => {
-      if (e.direction === "backward") c.backward++;
-      else c.forward++;
+      if (e.direction === "backward") backward++;
+      else forward++;
     });
-    return c;
+    return { status, seeds, backward, forward };
   }, [nodes, edges]);
 
   // ------------------------------------------------------------------
-  // Node shape by source: circle (OpenAlex or seed), rounded square
-  // (export file), diamond (manual entry).
+  // Export: the current map as a standalone figure.
   // ------------------------------------------------------------------
-  function NodeShape({ n }: { n: SnowballNode }) {
-    const r = nodeRadius(n);
-    const fill = fillOf(n);
-    const common = {
-      stroke: n.isSeed ? pal.ink : pal.surfaceRing,
-      strokeWidth: n.isSeed ? 2.5 : 1,
+  const base = `${slugify(project.name)}-citation-map`;
+  function exportSvg() {
+    const svg = svgRef.current;
+    if (!svg) return;
+    downloadFile(`${base}.svg`, svg.outerHTML, "image/svg+xml");
+  }
+  function exportPng() {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const xml = new XMLSerializer().serializeToString(svg);
+    const img = new Image();
+    const scale = 2;
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = W * scale;
+      canvas.height = H * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = pal.surface;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${base}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
     };
-    if (n.status === "conflict") {
-      // Split node: left half included green, right half excluded red;
-      // the two-tone shape IS the conflict mark, not a third hue.
-      return (
-        <g>
-          <path
-            d={`M 0 ${-r} A ${r} ${r} 0 0 0 0 ${r} Z`}
-            fill={pal.included}
-            {...common}
-          />
-          <path
-            d={`M 0 ${-r} A ${r} ${r} 0 0 1 0 ${r} Z`}
-            fill={pal.excluded}
-            {...common}
-          />
-        </g>
-      );
-    }
-    if (!n.isSeed && n.source === "file") {
-      const s = r * 1.72;
-      return (
-        <rect
-          x={-s / 2}
-          y={-s / 2}
-          width={s}
-          height={s}
-          rx={3}
-          fill={fill}
-          {...common}
-        />
-      );
-    }
-    if (!n.isSeed && n.source === "manual") {
-      return (
-        <path
-          d={`M 0 ${-r * 1.2} L ${r * 1.2} 0 L 0 ${r * 1.2} L ${-r * 1.2} 0 Z`}
-          fill={fill}
-          {...common}
-        />
-      );
-    }
-    return <circle r={r} fill={fill} {...common} />;
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
   }
 
   // ------------------------------------------------------------------
@@ -563,6 +684,8 @@ export default function SnowballMap({ project }: { project: Project }) {
         ? "border-teal-600 bg-teal-50 text-teal-800 dark:border-teal-500 dark:bg-teal-950 dark:text-teal-200"
         : "border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
     }`;
+  const zoomBtn =
+    "flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 shadow-sm transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   if (error) {
     return (
@@ -588,65 +711,69 @@ export default function SnowballMap({ project }: { project: Project }) {
     );
   }
 
-  const invisible = nodes.length - visibleIds.size;
+  const hiddenCount = nodes.length - visibleIds.size;
+  const legendStatus: MapStatus[] = [
+    "included",
+    "excluded",
+    "conflict",
+    "screening",
+    "prescreened",
+  ];
 
   return (
     <div
       data-frame={frame}
-      className="mb-6 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+      className="mb-6 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <h2 className="mr-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
           Citation map
         </h2>
         <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-          {counts.seeds} seeds · {counts.backward} backward · {counts.forward}{" "}
-          forward
-          {counts.openalex + counts.file + counts.manual > 0 &&
-            ` · via OpenAlex ${counts.openalex}, files ${counts.file}, manual ${counts.manual}`}
+          {counts.seeds} seeds · {counts.backward} backward ·{" "}
+          {counts.forward} forward
         </span>
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="ml-auto text-xs text-zinc-500 underline underline-offset-2 dark:text-zinc-400"
-        >
-          {collapsed ? "show map" : "hide map"}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={exportSvg} className={chip(false)}>
+            SVG
+          </button>
+          <button onClick={exportPng} className={chip(false)}>
+            PNG
+          </button>
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="text-xs text-zinc-500 underline underline-offset-2 dark:text-zinc-400"
+          >
+            {collapsed ? "show map" : "hide map"}
+          </button>
+        </div>
       </div>
 
       {!collapsed && (
         <>
-          {/* Filter row */}
           <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
             <button
               onClick={() => setShowBackward((v) => !v)}
               className={chip(showBackward)}
+              title="Papers the seeds cite (their reference lists)"
             >
-              backward
+              backward ({counts.backward})
             </button>
             <button
               onClick={() => setShowForward((v) => !v)}
               className={chip(showForward)}
+              title="Papers that cite the seeds"
             >
-              forward
+              forward ({counts.forward})
             </button>
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
-            {(
-              [
-                "included",
-                "excluded",
-                "conflict",
-                "screening",
-                "prescreened",
-              ] as MapStatus[]
-            ).map((s) => (
+            {legendStatus.map((s) => (
               <button
                 key={s}
-                onClick={() =>
-                  setStatusOn((m) => ({ ...m, [s]: !m[s] }))
-                }
+                onClick={() => setStatusOn((m) => ({ ...m, [s]: !m[s] }))}
                 className={chip(statusOn[s])}
               >
-                {STATUS_LABEL[s]}
+                {STATUS_LABEL[s]} ({counts.status[s]})
               </button>
             ))}
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
@@ -666,16 +793,6 @@ export default function SnowballMap({ project }: { project: Project }) {
               placeholder="Find a paper..."
               className="ml-auto h-7 w-44 rounded-lg border border-zinc-300 bg-white px-2 text-xs text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
             />
-            <button
-              onClick={() => {
-                setView({ x: 0, y: 0, k: 1 });
-                setSelectedId(null);
-                setSearch("");
-              }}
-              className="rounded-full border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
-            >
-              reset view
-            </button>
           </div>
 
           <div className="relative flex">
@@ -683,6 +800,7 @@ export default function SnowballMap({ project }: { project: Project }) {
               ref={svgRef}
               viewBox={`0 0 ${W} ${H}`}
               className="h-[68vh] min-h-[420px] w-full min-w-0 cursor-grab touch-none select-none active:cursor-grabbing"
+              style={{ background: pal.surface }}
               onWheel={onWheel}
               onPointerDown={(e) => onPointerDown(e)}
               onPointerMove={onPointerMove}
@@ -694,8 +812,39 @@ export default function SnowballMap({ project }: { project: Project }) {
               role="img"
               aria-label="Snowball citation map"
             >
+              <defs>
+                <pattern
+                  id="snowmap-grid"
+                  width="26"
+                  height="26"
+                  patternUnits="userSpaceOnUse"
+                >
+                  <circle cx="1.2" cy="1.2" r="1.2" fill={pal.grid} opacity="0.5" />
+                </pattern>
+                <marker
+                  id="snowmap-arrow"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 9 5 L 0 9 Z" fill={pal.edge} />
+                </marker>
+                <filter id="snowmap-shadow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feDropShadow
+                    dx="0"
+                    dy="1.5"
+                    stdDeviation="2.5"
+                    floodColor="#000000"
+                    floodOpacity={isDark ? 0.5 : 0.18}
+                  />
+                </filter>
+              </defs>
+              <rect width={W} height={H} fill="url(#snowmap-grid)" />
+
               <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-                {/* Timeline axis */}
                 {layout === "timeline" && yearScale && (
                   <g>
                     {Array.from(
@@ -715,7 +864,7 @@ export default function SnowballMap({ project }: { project: Project }) {
                             y1={30}
                             y2={H - 34}
                             stroke={pal.edge}
-                            strokeOpacity={0.18}
+                            strokeOpacity={0.16}
                           />
                           <text
                             x={yearScale.x(y)}
@@ -731,101 +880,132 @@ export default function SnowballMap({ project }: { project: Project }) {
                   </g>
                 )}
 
-                {/* Edges under nodes */}
                 {edges.filter(edgeVisible).map((e) => {
-                  const s = e.source as SnowballNode;
-                  const t = e.target as SnowballNode;
-                  if (typeof s === "string" || typeof t === "string")
-                    return null;
-                  const op =
-                    0.35 * Math.min(emphasis(s), emphasis(t)) +
-                    (selectedId &&
-                    (e.seedId === selectedId || e.recordId === selectedId)
-                      ? 0.45
-                      : 0);
+                  const d = edgePath(e);
+                  if (!d) return null;
+                  const em = edgeEmphasis(e);
                   return (
-                    <line
+                    <path
                       key={e.id}
-                      x1={s.x}
-                      y1={s.y}
-                      x2={t.x}
-                      y2={t.y}
+                      d={d}
+                      fill="none"
                       stroke={pal.edge}
-                      strokeWidth={
-                        selectedId &&
-                        (e.seedId === selectedId || e.recordId === selectedId)
-                          ? 2
-                          : 1.2
-                      }
-                      strokeOpacity={op}
+                      strokeWidth={em.width}
+                      strokeOpacity={em.opacity}
                       strokeDasharray={
                         e.direction === "forward" ? "5 4" : undefined
                       }
+                      markerEnd="url(#snowmap-arrow)"
+                      style={{ transition: "stroke-opacity 180ms" }}
                     />
                   );
                 })}
 
-                {/* Nodes */}
-                {nodes.filter(nodeVisible).map((n) => (
-                  <g
-                    key={n.id}
-                    transform={`translate(${n.x ?? 0} ${n.y ?? 0})`}
-                    opacity={emphasis(n)}
-                    className="cursor-pointer"
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      onPointerDown(e, n.id);
-                    }}
-                    onPointerEnter={(e) => {
-                      setHoverId(n.id);
-                      const rect = svgRef.current?.getBoundingClientRect();
-                      if (rect) {
-                        setHoverPos({
-                          x: e.clientX - rect.left,
-                          y: e.clientY - rect.top,
-                        });
+                {nodes
+                  .filter((n) => visibleIds.has(n.id))
+                  .map((n) => (
+                    <g
+                      key={n.id}
+                      transform={`translate(${n.x ?? 0} ${n.y ?? 0})`}
+                      opacity={emphasis(n)}
+                      className="cursor-pointer"
+                      style={{ transition: "opacity 180ms" }}
+                      filter={
+                        n.isSeed || n.id === selectedId || n.id === hoverId
+                          ? "url(#snowmap-shadow)"
+                          : undefined
                       }
-                    }}
-                    onPointerLeave={() => {
-                      setHoverId(null);
-                      setHoverPos(null);
-                    }}
-                  >
-                    {/* Oversized invisible hit target */}
-                    <circle
-                      r={nodeRadius(n) + 7}
-                      fill="transparent"
-                      stroke="none"
-                    />
-                    <NodeShape n={n} />
-                    {(n.isSeed ||
-                      view.k >= 1.25 ||
-                      n.id === hoverId ||
-                      n.id === selectedId) && (
-                      <text
-                        y={nodeRadius(n) + 13}
-                        textAnchor="middle"
-                        fontSize={n.isSeed ? 12.5 : 11}
-                        fontWeight={n.isSeed ? 600 : 400}
-                        fill={pal.label}
-                        stroke={pal.surfaceRing}
-                        strokeWidth={3}
-                        paintOrder="stroke"
-                      >
-                        {n.label}
-                      </text>
-                    )}
-                  </g>
-                ))}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        onPointerDown(e, n.id);
+                      }}
+                      onPointerEnter={(e) => {
+                        setHoverId(n.id);
+                        const rect = svgRef.current?.getBoundingClientRect();
+                        if (rect) {
+                          setHoverPos({
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top,
+                          });
+                        }
+                      }}
+                      onPointerLeave={() => {
+                        setHoverId(null);
+                        setHoverPos(null);
+                      }}
+                    >
+                      <circle
+                        r={nodeRadius(n) + 7}
+                        fill="transparent"
+                        stroke="none"
+                      />
+                      {n.id === selectedId && (
+                        <circle
+                          r={nodeRadius(n) + 5}
+                          fill="none"
+                          stroke={isDark ? "#2dd4bf" : "#0f766e"}
+                          strokeWidth={2}
+                          strokeDasharray="3 3"
+                        />
+                      )}
+                      <NodeShape n={n} pal={pal} />
+                      {(n.isSeed ||
+                        view.k >= 1.2 ||
+                        n.id === hoverId ||
+                        n.id === selectedId) && (
+                        <text
+                          y={nodeRadius(n) + 13}
+                          textAnchor="middle"
+                          fontSize={n.isSeed ? 12.5 : 11}
+                          fontWeight={n.isSeed ? 600 : 400}
+                          fill={pal.label}
+                          stroke={pal.surface}
+                          strokeWidth={3}
+                          paintOrder="stroke"
+                        >
+                          {n.label}
+                        </text>
+                      )}
+                    </g>
+                  ))}
               </g>
             </svg>
 
-            {/* Hover tooltip */}
+            {/* Zoom controls */}
+            <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1.5">
+              <button
+                onClick={() => zoomAt(1.35, W / 2, H / 2)}
+                className={zoomBtn}
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              <button
+                onClick={() => zoomAt(1 / 1.35, W / 2, H / 2)}
+                className={zoomBtn}
+                aria-label="Zoom out"
+              >
+                −
+              </button>
+              <button
+                onClick={() => {
+                  fitView();
+                  setSelectedId(null);
+                  setSearch("");
+                }}
+                className={zoomBtn}
+                title="Fit the whole map"
+                aria-label="Fit view"
+              >
+                ⛶
+              </button>
+            </div>
+
             {hovered && hoverPos && !draggingNode && (
               <div
                 className="pointer-events-none absolute z-10 max-w-72 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
                 style={{
-                  left: Math.min(hoverPos.x + 14, 900),
+                  left: Math.min(hoverPos.x + 14, 880),
                   top: hoverPos.y + 10,
                 }}
               >
@@ -843,7 +1023,6 @@ export default function SnowballMap({ project }: { project: Project }) {
               </div>
             )}
 
-            {/* Detail panel */}
             {selected && (
               <aside className="absolute right-3 top-3 z-10 w-72 rounded-xl border border-zinc-200 bg-white p-4 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-950">
                 <div className="mb-1 flex items-start justify-between gap-2">
@@ -859,14 +1038,12 @@ export default function SnowballMap({ project }: { project: Project }) {
                   </button>
                 </div>
                 <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">
-                  {[selected.authors, selected.year]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {[selected.authors, selected.year].filter(Boolean).join(" · ")}
                 </p>
                 <p className="mb-2 text-xs text-zinc-700 dark:text-zinc-300">
                   {selected.isSeed
                     ? "Seed paper (included after full text)"
-                    : `Status: ${STATUS_LABEL[selected.status]} · entered via ${SOURCE_LABEL[selected.source]}`}
+                    : `${STATUS_LABEL[selected.status]} · entered via ${SOURCE_LABEL[selected.source]}`}
                 </p>
                 {selectedEdges.length > 0 && (
                   <div className="mb-2 max-h-40 overflow-y-auto text-xs text-zinc-600 dark:text-zinc-400">
@@ -900,7 +1077,6 @@ export default function SnowballMap({ project }: { project: Project }) {
             )}
           </div>
 
-          {/* Legend */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-zinc-200 px-4 py-2.5 text-xs text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
             <span className="inline-flex items-center gap-1.5">
               <svg width="14" height="14" viewBox="-7 -7 14 14">
@@ -908,72 +1084,59 @@ export default function SnowballMap({ project }: { project: Project }) {
               </svg>
               seed
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <circle r="5" fill={pal.included} />
-              </svg>
-              included
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <circle r="5" fill={pal.excluded} />
-              </svg>
-              excluded
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <path d="M 0 -5 A 5 5 0 0 0 0 5 Z" fill={pal.included} />
-                <path d="M 0 -5 A 5 5 0 0 1 0 5 Z" fill={pal.excluded} />
-              </svg>
-              conflict
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <circle r="5" fill={pal.screening} />
-              </svg>
-              in screening
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <circle r="5" fill={pal.prescreened} />
-              </svg>
-              AI prescreened
-            </span>
+            {legendStatus.map((s) => (
+              <span key={s} className="inline-flex items-center gap-1.5">
+                <svg width="12" height="12" viewBox="-6 -6 12 12">
+                  {s === "conflict" ? (
+                    <>
+                      <path d="M 0 -5 A 5 5 0 0 0 0 5 Z" fill={pal.included} />
+                      <path d="M 0 -5 A 5 5 0 0 1 0 5 Z" fill={pal.excluded} />
+                    </>
+                  ) : (
+                    <circle r="5" fill={pal[s]} />
+                  )}
+                </svg>
+                {STATUS_LABEL[s]}
+              </span>
+            ))}
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
             <span className="inline-flex items-center gap-1.5">
               <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <circle r="5" fill={pal.screening} />
+                <circle r="5" fill={pal.edge} />
               </svg>
               OpenAlex
             </span>
             <span className="inline-flex items-center gap-1.5">
               <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <rect x="-4.5" y="-4.5" width="9" height="9" rx="2" fill={pal.screening} />
+                <rect x="-4.5" y="-4.5" width="9" height="9" rx="2" fill={pal.edge} />
               </svg>
               export file
             </span>
             <span className="inline-flex items-center gap-1.5">
               <svg width="12" height="12" viewBox="-6 -6 12 12">
-                <path d="M 0 -5.5 L 5.5 0 L 0 5.5 L -5.5 0 Z" fill={pal.screening} />
+                <path d="M 0 -5.5 L 5.5 0 L 0 5.5 L -5.5 0 Z" fill={pal.edge} />
               </svg>
               manual
             </span>
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
             <span className="inline-flex items-center gap-1.5">
-              <svg width="26" height="8" viewBox="0 0 26 8">
-                <line x1="1" y1="4" x2="25" y2="4" stroke={pal.edge} strokeWidth="1.6" />
+              <svg width="30" height="8" viewBox="0 0 30 8">
+                <line x1="1" y1="4" x2="22" y2="4" stroke={pal.edge} strokeWidth="1.6" />
+                <path d="M 22 1 L 29 4 L 22 7 Z" fill={pal.edge} />
               </svg>
               seed cites it (backward)
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <svg width="26" height="8" viewBox="0 0 26 8">
-                <line x1="1" y1="4" x2="25" y2="4" stroke={pal.edge} strokeWidth="1.6" strokeDasharray="4 3" />
+              <svg width="30" height="8" viewBox="0 0 30 8">
+                <line x1="1" y1="4" x2="22" y2="4" stroke={pal.edge} strokeWidth="1.6" strokeDasharray="4 3" />
+                <path d="M 22 1 L 29 4 L 22 7 Z" fill={pal.edge} />
               </svg>
               cites the seed (forward)
             </span>
-            {invisible > 0 && (
-              <span className="ml-auto">{invisible} node(s) filtered out</span>
-            )}
+            <span className="ml-auto">
+              arrows point at the cited work
+              {hiddenCount > 0 && ` · ${hiddenCount} node(s) filtered out`}
+            </span>
           </div>
         </>
       )}
