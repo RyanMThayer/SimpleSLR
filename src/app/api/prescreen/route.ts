@@ -5,8 +5,10 @@ import {
   FRAMINGS,
   PARTNER_FRAMINGS,
   PRESCREEN_PROMPT_VERSION,
+  PRIMARY_DUAL_FRAMINGS,
   criteriaHash,
   extractionPrompt,
+  factsUserPrompt,
   parseExtraction,
   parseVote,
   unanimousExclude,
@@ -210,12 +212,16 @@ export async function POST(req: Request) {
     proj.inclusion_criteria,
     exclusionText
   );
-  const expected: { framing: Framing; model: string; key: string }[] = [
-    ...FRAMINGS.map((f) => ({ f, m: model, k: apiKey })),
-    ...(partner && secondApiKey
-      ? PARTNER_FRAMINGS.map((f) => ({ f, m: partner, k: secondApiKey }))
-      : []),
-  ].map((x) => ({ framing: x.f, model: x.m, key: x.k }));
+  // Five votes always: all five procedures on one model, or the five
+  // split across two models when both provider keys are present.
+  const expected: { framing: Framing; model: string; key: string }[] = (
+    partner && secondApiKey
+      ? [
+          ...PRIMARY_DUAL_FRAMINGS.map((f) => ({ f, m: model, k: apiKey })),
+          ...PARTNER_FRAMINGS.map((f) => ({ f, m: partner, k: secondApiKey })),
+        ]
+      : [...FRAMINGS].map((f) => ({ f, m: model, k: apiKey }))
+  ).map((x) => ({ framing: x.f, model: x.m, key: x.k }));
 
   // Reuse the ledger: only compute slots with no stored vote for the
   // current prompt version and criteria hash.
@@ -291,11 +297,15 @@ export async function POST(req: Request) {
             proj.inclusion_criteria,
             exclusionText
           ),
-          voteUserPrompt(
-            rec.title,
-            rec.abstract,
-            factsByModel.get(slot.model) ?? null
-          )
+          // The facts framing judges the extraction alone (no abstract)
+          // when one exists; every other framing sees both.
+          slot.framing === "facts" && factsByModel.get(slot.model)
+            ? factsUserPrompt(rec.title, factsByModel.get(slot.model)!)
+            : voteUserPrompt(
+                rec.title,
+                rec.abstract,
+                factsByModel.get(slot.model) ?? null
+              )
         );
         // Fail open: an API error is a pass vote with the error noted.
         const parsed = call.text

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { keyStoreFor } from "@/lib/aiModels";
+import ApiKeyInfoModal from "@/components/project/ApiKeyInfoModal";
 
 /**
  * The one place API keys are managed. Keys live in this browser's
@@ -15,6 +16,16 @@ export default function ApiKeysCard() {
   const [hasOpenai, setHasOpenai] = useState(false);
   const [draft, setDraft] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  function refresh() {
+    try {
+      setHasAnthropic(Boolean(localStorage.getItem(keyStoreFor("anthropic"))));
+      setHasOpenai(Boolean(localStorage.getItem(keyStoreFor("openai"))));
+    } catch {
+      // Storage unavailable.
+    }
+  }
 
   useEffect(() => {
     try {
@@ -91,9 +102,21 @@ export default function ApiKeysCard() {
           run, and is relayed straight to Anthropic or OpenAI, never
           stored on the server; teammates bring their own. Create a
           dedicated key for SimpleSLR and set a monthly spend limit in the
-          provider dashboard so a leak is capped and revocable.
+          provider dashboard so a leak is capped and revocable.{" "}
+          <button
+            type="button"
+            onClick={() => setInfoOpen(true)}
+            className="underline underline-offset-2 hover:text-teal-700 dark:hover:text-teal-300"
+          >
+            How your key is handled, how to get one, and what runs cost
+          </button>
         </p>
       </div>
+      <ApiKeyInfoModal
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        onKeysChanged={refresh}
+      />
       {row("anthropic", hasAnthropic)}
       {row("openai", hasOpenai)}
       <div className="flex gap-1.5">

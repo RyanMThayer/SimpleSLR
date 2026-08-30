@@ -361,21 +361,13 @@ export default function PrescreenPanel({
             </div>
 
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Removes only records that are unmistakably outside your
-              criteria, before human screening. Each record is judged by
-              three independent procedures
-              {hasPartnerKey
-                ? ", plus two more on a second model from the other provider,"
-                : ""}{" "}
-              at deterministic settings, and is removed ONLY if every vote
-              says exclude with a verifiable criterion; one dissent keeps it
-              in your queue. Removed records are counted in the PRISMA
-              diagram as ineligible by automation, stay browsable under the
-              records filter, and can be restored with one click. Records
-              with little or no abstract are removed only when the title
-              alone makes ineligibility unmistakable (proceedings front
-              matter, calls for papers, and similar search debris);
-              anything less certain goes to humans.
+              Removed records are counted in the PRISMA diagram as
+              ineligible by automation, stay browsable under the records
+              filter, and can be restored with one click. Records with
+              little or no abstract are removed only when the title alone
+              makes ineligibility unmistakable (proceedings front matter,
+              calls for papers, and similar search debris); anything less
+              certain goes to humans.
             </p>
 
             {needsSetup && (
@@ -464,8 +456,8 @@ export default function PrescreenPanel({
               </label>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 {hasPartnerKey
-                  ? `5 votes: 3 on ${model}, 2 on ${partnerModelFor(model)} (cross provider).`
-                  : `3 votes on ${model}; save the other provider's key to add 2 cross provider votes.`}
+                  ? `Five procedures vote, split across ${model} and ${partnerModelFor(model)} (cross provider); unanimity removes.`
+                  : `Five procedures vote on ${model}; unanimity removes. Save the other provider's key to split them across two models.`}
               </span>
             </div>
 
