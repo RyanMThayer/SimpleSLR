@@ -1115,22 +1115,42 @@ export default function RecordsClient({
       const supabase = createClient();
       const { data } = await supabase
         .from("prescreen_votes")
-        .select("framing, model, verdict, criterion, note")
+        .select(
+          "framing, model, verdict, criterion, note, prompt_version, criteria_hash, created_at"
+        )
         .eq("record_id", r.id)
-        .order("created_at");
+        .order("created_at", { ascending: false });
       if (cancelled) return;
+      // The ledger keeps every run, but only the newest
+      // (prompt version, criteria hash) group is the vote set that
+      // made the standing decision; older runs answered a different
+      // question (earlier criteria or prompts) and only confuse here.
+      type VoteRow = {
+        framing: string;
+        model: string;
+        verdict: string;
+        criterion: string | null;
+        note: string | null;
+        prompt_version: string;
+        criteria_hash: string;
+      };
+      const all2 = (data ?? []) as VoteRow[];
+      const head = all2[0];
+      const standing = head
+        ? all2.filter(
+            (v) =>
+              v.prompt_version === head.prompt_version &&
+              v.criteria_hash === head.criteria_hash
+          )
+        : [];
+      const orderOf = (f: string) =>
+        ["checklist", "advocate", "reviewer", "facts", "skeptic", "veto"].indexOf(
+          f
+        );
+      standing.sort((a2, b2) => orderOf(a2.framing) - orderOf(b2.framing));
       setPrescreenVotes((m) => {
         const next = new Map(m);
-        next.set(
-          r.id,
-          (data ?? []) as {
-            framing: string;
-            model: string;
-            verdict: string;
-            criterion: string | null;
-            note: string | null;
-          }[]
-        );
+        next.set(r.id, standing);
         return next;
       });
     })();
@@ -1936,8 +1956,15 @@ export default function RecordsClient({
                           <ul className="mb-2 flex flex-col gap-0.5">
                             {(prescreenVotes.get(r.id) ?? []).map((v, i) => (
                               <li key={i}>
-                                {v.framing} · {v.model}: {v.verdict}
-                                {v.criterion ? ` ("${v.criterion}")` : ""}
+                                {v.framing === "veto"
+                                  ? `plausibility check · ${v.model}: ${
+                                      v.verdict === "exclude"
+                                        ? "no plausible eligible reading; removal allowed"
+                                        : "removal vetoed"
+                                    }`
+                                  : `${v.framing} · ${v.model}: ${v.verdict}${
+                                      v.criterion ? ` ("${v.criterion}")` : ""
+                                    }`}
                                 {v.note ? ` · ${v.note}` : ""}
                               </li>
                             ))}

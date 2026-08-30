@@ -437,7 +437,11 @@ export default function PrescreenPanel({
               little or no abstract are removed only when the title alone
               makes ineligibility unmistakable (proceedings front matter,
               calls for papers, and similar search debris); anything less
-              certain goes to humans.
+              certain goes to humans. The prescreen is only as accurate
+              as the criteria it is given: every removal must ground in
+              the written wording of one criterion, so a criterion that
+              says less than you mean will be applied as written, not as
+              intended.
             </p>
 
             {needsSetup && (
