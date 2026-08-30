@@ -9,6 +9,7 @@ import {
   stageStatus,
 } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
+import { matchCriterionLine } from "@/lib/prescreen";
 import {
   abstractFromPdfText,
   findMissingAbstracts,
@@ -103,6 +104,11 @@ export default function RecordsClient({
   >(new Map());
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [reasons, setReasons] = useState<ExclusionReason[]>([]);
+  // Unanimous criterion cited by the AI prescreen per removed record
+  // on the current page, so its chip can wear the exclusion code.
+  const [prescreenCrit, setPrescreenCrit] = useState<Map<string, string>>(
+    new Map()
+  );
   const [inclusionCodes, setInclusionCodes] = useState<InclusionCode[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [total, setTotal] = useState(0);
@@ -360,17 +366,52 @@ export default function RecordsClient({
       }
 
       const df = decisionFilter;
+      // For a specific-reason exclude filter, resolve each AI-removed
+      // record's unanimous criterion to the matching reason id so the
+      // prescreen's removals answer to the same E-codes humans use.
+      const psReason = new Map<string, string>();
+      if (df.kind === "exclude" && df.reasonId && df.reasonId !== "any") {
+        const psIds = all
+          .filter((r) => r.status === "prescreen_excluded")
+          .map((r) => r.id);
+        const counts = new Map<string, Map<string, number>>();
+        for (let i = 0; i < psIds.length; i += 100) {
+          const { data: pv } = await supabase
+            .from("prescreen_votes")
+            .select("record_id, criterion")
+            .eq("verdict", "exclude")
+            .in("record_id", psIds.slice(i, i + 100));
+          (
+            (pv ?? []) as { record_id: string; criterion: string | null }[]
+          ).forEach((v) => {
+            if (!v.criterion) return;
+            const m = counts.get(v.record_id) ?? new Map<string, number>();
+            m.set(v.criterion, (m.get(v.criterion) ?? 0) + 1);
+            counts.set(v.record_id, m);
+          });
+        }
+        counts.forEach((m, id) => {
+          const top = [...m.entries()].sort((a2, b2) => b2[1] - a2[1])[0];
+          if (!top) return;
+          const hit = reasons.find((re) =>
+            matchCriterionLine(`- ${re.label}`, top[0])
+          );
+          if (hit) psReason.set(id, hit.id);
+        });
+      }
       const matches = (r: RecordRow): boolean => {
         // The AI prescreen is a title/abstract stage exclusion, so its
-        // removals surface under the excluded filters for that stage
-        // (under "any reason"; their reason lives in the vote ledger),
-        // and never under undecided.
+        // removals surface under the excluded filters for that stage,
+        // never under undecided; a specific reason matches when the
+        // unanimous criterion resolves to that reason.
         if (r.status === "prescreen_excluded") {
-          return (
-            df.kind === "exclude" &&
-            df.reasonId === "any" &&
-            (df.stage === "any" || df.stage === "title_abstract")
-          );
+          if (df.kind !== "exclude") return false;
+          if (df.stage !== "any" && df.stage !== "title_abstract") {
+            return false;
+          }
+          if (df.reasonId === "any") return true;
+          if (df.reasonId === null) return false;
+          return psReason.get(r.id) === df.reasonId;
         }
         if (df.kind === "undecided") return (ta.get(r.id)?.length ?? 0) === 0;
         // Only decisions the current viewer may see participate in
@@ -412,6 +453,34 @@ export default function RecordsClient({
     setTaDecs(ta);
     setFtDecs(ft);
     setResolutions(resMap);
+
+    // Unanimous criterion per AI-removed row on this page, for the
+    // exclusion-code chip.
+    const psPageIds = pageRecords
+      .filter((r) => r.status === "prescreen_excluded")
+      .map((r) => r.id);
+    const critMap = new Map<string, string>();
+    if (psPageIds.length > 0) {
+      const { data: pv } = await supabase
+        .from("prescreen_votes")
+        .select("record_id, criterion")
+        .eq("verdict", "exclude")
+        .in("record_id", psPageIds);
+      const byRec = new Map<string, Map<string, number>>();
+      (
+        (pv ?? []) as { record_id: string; criterion: string | null }[]
+      ).forEach((v) => {
+        if (!v.criterion) return;
+        const m = byRec.get(v.record_id) ?? new Map<string, number>();
+        m.set(v.criterion, (m.get(v.criterion) ?? 0) + 1);
+        byRec.set(v.record_id, m);
+      });
+      byRec.forEach((m, id) => {
+        const top = [...m.entries()].sort((a2, b2) => b2[1] - a2[1])[0];
+        if (top) critMap.set(id, top[0]);
+      });
+    }
+    setPrescreenCrit(critMap);
 
     // Snowball provenance for the visible page. The query errors before
     // migration 0010; the panel then simply shows nothing.
@@ -1689,14 +1758,27 @@ export default function RecordsClient({
                       duplicate
                     </span>
                   )}
-                  {r.status === "prescreen_excluded" && (
-                    <span
-                      className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-950 dark:text-violet-300"
-                      title="Removed before screening by the AI prescreen (unanimous votes); open the record to see the votes or restore it"
-                    >
-                      AI prescreened
-                    </span>
-                  )}
+                  {r.status === "prescreen_excluded" &&
+                    (() => {
+                      const crit = prescreenCrit.get(r.id);
+                      const idx = crit
+                        ? reasons.findIndex((re) =>
+                            matchCriterionLine(`- ${re.label}`, crit)
+                          )
+                        : -1;
+                      return (
+                        <span
+                          className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                          title={`Title/abstract: ${
+                            idx >= 0 ? reasons[idx].label : "removed"
+                          } · by the AI prescreen (unanimous votes); open the record to see the votes or restore it`}
+                        >
+                          {idx >= 0
+                            ? `AI exclude: E${idx + 1}`
+                            : "AI prescreened"}
+                        </span>
+                      );
+                    })()}
                   {r.retrieval_status === "not_retrieved" && (
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                       no access
