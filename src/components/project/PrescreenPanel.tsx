@@ -34,6 +34,8 @@ export default function PrescreenPanel({
   const [hasAnthropic, setHasAnthropic] = useState(false);
   const [hasOpenai, setHasOpenai] = useState(false);
   const [running, setRunning] = useState<"live" | "validate" | null>(null);
+  const [prescreenedCount, setPrescreenedCount] = useState(0);
+  const [restoring, setRestoring] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +146,42 @@ export default function PrescreenPanel({
       setHasAnthropic(false);
       setHasOpenai(false);
     }
-  }, [open]);
+    (async () => {
+      const supabase = createClient();
+      const { count } = await supabase
+        .from("records")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", project.id)
+        .eq("status", "prescreen_excluded");
+      setPrescreenedCount(count ?? 0);
+    })();
+  }, [open, project.id]);
+
+  // Bulk undo: puts every AI-removed record back into screening in one
+  // stroke, so the prescreen can be rerun after prompt or criteria
+  // changes without restoring records one by one. The vote ledger is
+  // untouched; it remains the audit trail of the earlier run.
+  async function restoreAll() {
+    if (restoring || running) return;
+    setRestoring(true);
+    setError(null);
+    const supabase = createClient();
+    const { error: upErr } = await supabase
+      .from("records")
+      .update({ status: "active" })
+      .eq("project_id", project.id)
+      .eq("status", "prescreen_excluded");
+    setRestoring(false);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setSummary(
+      `Restored ${prescreenedCount} prescreened record(s) to screening; rerun the prescreen to re-evaluate them.`
+    );
+    setPrescreenedCount(0);
+    onDone();
+  }
 
   // Which model(s) this run uses follows from the saved keys alone.
   const plan = prescreenPlan(hasAnthropic, hasOpenai);
@@ -462,6 +499,18 @@ export default function PrescreenPanel({
                   className={btn}
                 >
                   Stop
+                </button>
+              )}
+              {prescreenedCount > 0 && !running && (
+                <button
+                  onClick={restoreAll}
+                  disabled={restoring}
+                  className={btn}
+                  title="Puts every AI-removed record back into screening so the prescreen can be rerun; stored votes stay as the audit trail"
+                >
+                  {restoring
+                    ? "Restoring..."
+                    : `Restore all ${prescreenedCount} prescreened record(s)`}
                 </button>
               )}
             </div>
