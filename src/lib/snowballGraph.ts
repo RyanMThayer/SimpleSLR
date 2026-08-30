@@ -28,6 +28,9 @@ export type SnowballNode = {
   year: number | null;
   isSeed: boolean;
   status: MapStatus;
+  /** Title/abstract screening settled include (seeds trivially true),
+   * regardless of where full text screening stands. */
+  taIncluded: boolean;
   source: SourceKind;
   degree: number;
   /** "Webster 2002" style label for direct labeling on the map. */
@@ -199,8 +202,9 @@ export function buildSnowballGraph(input: {
   records: Map<string, RecordLite>;
   batches: Map<string, BatchLite>;
   statusOf: (rec: RecordLite) => MapStatus;
+  taPassedOf?: (rec: RecordLite) => boolean;
 }): { nodes: SnowballNode[]; edges: SnowballEdge[] } {
-  const { links, records, batches, statusOf } = input;
+  const { links, records, batches, statusOf, taPassedOf } = input;
   const nodes = new Map<string, SnowballNode>();
   const edges: SnowballEdge[] = [];
   const seen = new Set<string>();
@@ -210,7 +214,10 @@ export function buildSnowballGraph(input: {
     if (existing) {
       // A record can be both a seed and someone's candidate; seedness
       // wins because it anchors the layout.
-      if (isSeed) existing.isSeed = true;
+      if (isSeed) {
+        existing.isSeed = true;
+        existing.taIncluded = true;
+      }
       return existing;
     }
     const node: SnowballNode = {
@@ -220,6 +227,7 @@ export function buildSnowballGraph(input: {
       year: rec.year,
       isSeed,
       status: statusOf(rec),
+      taIncluded: isSeed || (taPassedOf?.(rec) ?? false),
       source: isSeed
         ? "screening"
         : sourceKindOf(rec.batch_id ? batches.get(rec.batch_id) : undefined),

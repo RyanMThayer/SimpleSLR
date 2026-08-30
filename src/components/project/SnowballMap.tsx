@@ -17,7 +17,7 @@ import {
   forceY,
 } from "d3-force";
 import { createClient } from "@/lib/supabase/client";
-import { requiredFor } from "@/lib/outcomes";
+import { requiredFor, stageStatus } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { downloadFile, slugify } from "@/lib/export";
 import {
@@ -192,15 +192,6 @@ function edgePath(e: SnowballEdge): string | null {
   return `M ${ax} ${ay} Q ${mx} ${my} ${bx} ${by}`;
 }
 
-/** Axis tick spacing for the yield bars: 1, 2, or 5 times a power of
- * ten, whichever first keeps the count near seven. */
-function niceStep(max: number): number {
-  if (max <= 8) return 1;
-  const pow = Math.pow(10, Math.max(0, Math.floor(Math.log10(max / 7))));
-  for (const m of [1, 2, 5]) if (7 * m * pow >= max) return m * pow;
-  return 10 * pow;
-}
-
 function truncateLabel(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
 }
@@ -227,6 +218,10 @@ export default function SnowballMap({ project }: { project: Project }) {
     screening: true,
   });
   const [search, setSearch] = useState("");
+  // "ta" narrows candidates to settled title/abstract includes.
+  const [scope, setScope] = useState<"all" | "ta">("all");
+  const [flowHover, setFlowHover] = useState<string | null>(null);
+  const [flowTip, setFlowTip] = useState<string[] | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(
     null
@@ -344,6 +339,12 @@ export default function SnowballMap({ project }: { project: Project }) {
             resMap.get(resKey("full_text", rec.id)),
             req
           ),
+        taPassedOf: (rec) =>
+          stageStatus(
+            ta.get(rec.id) ?? [],
+            resMap.get(resKey("title_abstract", rec.id)) ?? null,
+            req("title_abstract")
+          ).kind === "included",
       });
       setData(graph);
       setError(null);
@@ -582,55 +583,102 @@ export default function SnowballMap({ project }: { project: Project }) {
         .filter(
           (n) =>
             (n.isSeed || statusOn[n.status]) &&
-            (n.isSeed || connected.has(n.id))
+            (n.isSeed || connected.has(n.id)) &&
+            (n.isSeed || scope === "all" || n.taIncluded)
         )
         .map((n) => n.id)
     );
-  }, [nodes, edges, statusOn, directionPass]);
+  }, [nodes, edges, statusOn, directionPass, scope]);
 
   const edgeVisible = (e: SnowballEdge) =>
     directionPass(e) && visibleIds.has(e.seedId) && visibleIds.has(e.recordId);
 
-  // One row per seed for the yield view: how many papers its citation
-  // searches surfaced and where each stands, honoring the direction
-  // and status chips. A paper found from several seeds counts once in
-  // each of their bars.
-  const yieldRows = useMemo(() => {
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const perSeed = new Map<string, Map<string, MapStatus>>();
-    nodes.filter((n) => n.isSeed).forEach((n) => perSeed.set(n.id, new Map()));
+  const nodeById = useMemo(
+    () => new Map(nodes.map((n) => [n.id, n])),
+    [nodes]
+  );
+
+  // The flow view's data: every surviving link is one row traveling
+  // seed -> search direction -> corroboration -> screening outcome,
+  // aggregated into ribbon paths alluvial-style. A paper found from
+  // several seeds travels one ribbon per seed, and the corroboration
+  // axis is exactly where those overlaps become visible.
+  const flow = useMemo(() => {
+    type Row = {
+      seedId: string;
+      dir: "backward" | "forward";
+      recordId: string;
+      outcome: MapStatus;
+    };
+    const rows: Row[] = [];
     const seedsOf = new Map<string, Set<string>>();
     edges.forEach((e) => {
       if (!directionPass(e)) return;
-      const cand = byId.get(e.recordId);
+      const cand = nodeById.get(e.recordId);
       if (!cand || !statusOn[cand.status]) return;
-      perSeed.get(e.seedId)?.set(e.recordId, cand.status);
+      if (scope === "ta" && !cand.taIncluded) return;
+      rows.push({
+        seedId: e.seedId,
+        dir: e.direction,
+        recordId: e.recordId,
+        outcome: cand.status,
+      });
       const s = seedsOf.get(e.recordId) ?? new Set<string>();
       s.add(e.seedId);
       seedsOf.set(e.recordId, s);
     });
-    let overlap = 0;
-    seedsOf.forEach((s) => {
-      if (s.size > 1) overlap++;
+    type FlowPath = {
+      key: string;
+      seedId: string;
+      dir: "backward" | "forward";
+      shared: boolean;
+      outcome: MapStatus;
+      count: number;
+    };
+    const pathMap = new Map<string, FlowPath>();
+    const outcomePapers = new Map<MapStatus, Set<string>>();
+    rows.forEach((r) => {
+      const shared = (seedsOf.get(r.recordId)?.size ?? 1) > 1;
+      const key = `${r.seedId}|${r.dir}|${shared ? "s" : "o"}|${r.outcome}`;
+      const p = pathMap.get(key) ?? {
+        key,
+        seedId: r.seedId,
+        dir: r.dir,
+        shared,
+        outcome: r.outcome,
+        count: 0,
+      };
+      p.count++;
+      pathMap.set(key, p);
+      const set = outcomePapers.get(r.outcome) ?? new Set<string>();
+      set.add(r.recordId);
+      outcomePapers.set(r.outcome, set);
     });
-    const rows = [...perSeed.entries()]
-      .flatMap(([id, m]) => {
-        const seed = byId.get(id);
-        if (!seed) return [];
-        const counts: Record<MapStatus, number> = {
-          included: 0,
-          conflict: 0,
-          excluded: 0,
-          screening: 0,
-        };
-        m.forEach((st) => counts[st]++);
-        return [{ seed, counts, total: m.size }];
-      })
+    const paths = [...pathMap.values()];
+    const seedTotals = new Map<string, number>();
+    paths.forEach((p) =>
+      seedTotals.set(p.seedId, (seedTotals.get(p.seedId) ?? 0) + p.count)
+    );
+    const seedOrder = [...seedTotals.entries()]
       .sort(
-        (a, b) => b.total - a.total || a.seed.label.localeCompare(b.seed.label)
-      );
-    return { rows, overlap };
-  }, [nodes, edges, directionPass, statusOn]);
+        (a, b) =>
+          b[1] - a[1] ||
+          (nodeById.get(a[0])?.label ?? "").localeCompare(
+            nodeById.get(b[0])?.label ?? ""
+          )
+      )
+      .map(([id]) => id);
+    const sharedPapers = [...seedsOf.values()].filter((s) => s.size > 1)
+      .length;
+    return {
+      paths,
+      seedOrder,
+      outcomePapers,
+      totalLinks: rows.length,
+      uniquePapers: seedsOf.size,
+      sharedPapers,
+    };
+  }, [edges, nodeById, directionPass, statusOn, scope]);
 
   const neighborhood = useMemo(() => {
     const focus = selectedId ?? hoverId;
@@ -829,6 +877,14 @@ export default function SnowballMap({ project }: { project: Project }) {
                 {STATUS_LABEL[s]} ({counts.status[s]})
               </button>
             ))}
+            <button
+              onClick={() => setScope((s) => (s === "all" ? "ta" : "all"))}
+              className={chip(scope === "ta")}
+              title="Show only snowballed papers whose title/abstract screening settled on include"
+            >
+              passed title/abstract (
+              {nodes.filter((n) => !n.isSeed && n.taIncluded).length})
+            </button>
             <span className="mx-1 h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
             <button
               onClick={() => setLayout("network")}
@@ -848,9 +904,9 @@ export default function SnowballMap({ project }: { project: Project }) {
             <button
               onClick={() => setLayout("yield")}
               className={chip(layout === "yield")}
-              title="One bar per seed: how many papers its citation searches found and where they stand"
+              title="Alluvial flow: each seed's finds stream through search direction and corroboration into their screening outcome"
             >
-              seed yield
+              flow
             </button>
             <input
               value={search}
@@ -877,6 +933,8 @@ export default function SnowballMap({ project }: { project: Project }) {
               onPointerLeave={() => {
                 setHoverId(null);
                 setHoverPos(null);
+                setFlowHover(null);
+                setFlowTip(null);
               }}
               role="img"
               aria-label="Snowball citation map"
@@ -895,11 +953,22 @@ export default function SnowballMap({ project }: { project: Project }) {
                   viewBox="0 0 10 10"
                   refX="8"
                   refY="5"
-                  markerWidth="8.5"
-                  markerHeight="8.5"
+                  markerWidth="7.5"
+                  markerHeight="7.5"
                   orient="auto-start-reverse"
                 >
                   <path d="M 0 1 L 9 5 L 0 9 Z" fill={pal.edge} />
+                </marker>
+                <marker
+                  id="snowmap-arrow-seed"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="10.5"
+                  markerHeight="10.5"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 9 5 L 0 9 Z" fill={pal.ink} />
                 </marker>
                 <pattern
                   id="snowmap-conflict"
@@ -925,165 +994,347 @@ export default function SnowballMap({ project }: { project: Project }) {
 
               {layout === "yield" ? (
                 (() => {
-                  const rows = yieldRows.rows;
-                  const GUT = 205;
-                  const RIGHT = 60;
-                  const innerW = W - GUT - RIGHT;
-                  const n = Math.max(1, rows.length);
-                  const rowH = Math.min(58, (H - 76) / n);
-                  // Few seeds float to the vertical center instead of
-                  // huddling at the top of the canvas.
-                  const TOP = 28 + Math.max(0, (H - 76 - n * rowH) / 2);
-                  const barH = Math.min(23, Math.max(6, rowH * 0.55));
-                  const xMax = Math.max(1, ...rows.map((r) => r.total));
-                  const step = niceStep(xMax);
-                  const x = (v: number) => GUT + (v / xMax) * innerW;
-                  const bottom = TOP + rows.length * rowH;
-                  const ticks: number[] = [];
-                  for (let v = 0; v <= xMax; v += step) ticks.push(v);
-                  const order: MapStatus[] = [
-                    "included",
-                    "conflict",
-                    "excluded",
-                    "screening",
+                  const { paths, seedOrder, outcomePapers } = flow;
+                  if (paths.length === 0) {
+                    return (
+                      <text
+                        x={W / 2}
+                        y={H / 2}
+                        textAnchor="middle"
+                        fontSize={13}
+                        fill={pal.label}
+                      >
+                        No links match the current filters.
+                      </text>
+                    );
+                  }
+                  const dirOrder = (["backward", "forward"] as const).filter(
+                    (d) => paths.some((p) => p.dir === d)
+                  );
+                  const corrOrder = ["o", "s"].filter((c) =>
+                    paths.some((p) => (p.shared ? "s" : "o") === c)
+                  );
+                  const outOrder = (
+                    ["included", "conflict", "excluded", "screening"] as MapStatus[]
+                  ).filter((o) => paths.some((p) => p.outcome === o));
+                  const axes = [
+                    {
+                      x: 215,
+                      keys: seedOrder,
+                      of: (p: (typeof paths)[number]) => p.seedId,
+                    },
+                    {
+                      x: 545,
+                      keys: dirOrder as readonly string[],
+                      of: (p: (typeof paths)[number]) => p.dir,
+                    },
+                    {
+                      x: 765,
+                      keys: corrOrder,
+                      of: (p: (typeof paths)[number]) =>
+                        p.shared ? "s" : "o",
+                    },
+                    {
+                      x: 1000,
+                      keys: outOrder as readonly string[],
+                      of: (p: (typeof paths)[number]) => p.outcome,
+                    },
+                  ];
+                  const NW = 12;
+                  const TOPY = 60;
+                  const avail = H - TOPY - 40;
+                  const total = paths.reduce((a2, p) => a2 + p.count, 0);
+                  // Parallel-sets nesting: one global order drives the
+                  // ribbon stacking at every axis.
+                  const sorted = [...paths].sort(
+                    (a2, b2) =>
+                      axes[0].keys.indexOf(a2.seedId) -
+                        axes[0].keys.indexOf(b2.seedId) ||
+                      axes[1].keys.indexOf(a2.dir) -
+                        axes[1].keys.indexOf(b2.dir) ||
+                      Number(a2.shared) - Number(b2.shared) ||
+                      axes[3].keys.indexOf(a2.outcome) -
+                        axes[3].keys.indexOf(b2.outcome)
+                  );
+                  const layouts = axes.map((ax) => {
+                    const totals = new Map<string, number>();
+                    sorted.forEach((p) => {
+                      const k = ax.of(p);
+                      totals.set(k, (totals.get(k) ?? 0) + p.count);
+                    });
+                    const keys = ax.keys.filter(
+                      (k) => (totals.get(k) ?? 0) > 0
+                    );
+                    const pad =
+                      keys.length > 1
+                        ? Math.min(18, (avail * 0.12) / (keys.length - 1))
+                        : 0;
+                    const unit =
+                      (avail - pad * (keys.length - 1)) / Math.max(1, total);
+                    const y0 = new Map<string, number>();
+                    let y = TOPY;
+                    keys.forEach((k) => {
+                      y0.set(k, y);
+                      y += (totals.get(k) ?? 0) * unit + pad;
+                    });
+                    return {
+                      ...ax,
+                      keys,
+                      totals,
+                      unit,
+                      y0,
+                      cursor: new Map<string, number>(),
+                    };
+                  });
+                  // Per ribbon, its slot at every axis in global order.
+                  const segs = sorted.map((p) =>
+                    layouts.map((L) => {
+                      const k = L.of(p);
+                      const cur = L.cursor.get(k) ?? 0;
+                      L.cursor.set(k, cur + p.count);
+                      return {
+                        x: L.x,
+                        top: (L.y0.get(k) ?? TOPY) + cur * L.unit,
+                        h: p.count * L.unit,
+                      };
+                    })
+                  );
+                  const band = (
+                    ss: { x: number; top: number; h: number }[]
+                  ): string => {
+                    const n2 = ss.length;
+                    let d = `M ${ss[0].x + NW} ${ss[0].top}`;
+                    for (let i = 1; i < n2; i++) {
+                      const a2 = ss[i - 1];
+                      const b2 = ss[i];
+                      const mx = (a2.x + NW + b2.x) / 2;
+                      d += ` C ${mx} ${a2.top} ${mx} ${b2.top} ${b2.x} ${b2.top}`;
+                      if (i < n2 - 1) d += ` L ${b2.x + NW} ${b2.top}`;
+                    }
+                    const last = ss[n2 - 1];
+                    d += ` L ${last.x} ${last.top + last.h}`;
+                    for (let i = n2 - 1; i >= 1; i--) {
+                      const a2 = ss[i - 1];
+                      const b2 = ss[i];
+                      const mx = (a2.x + NW + b2.x) / 2;
+                      d += ` C ${mx} ${b2.top + b2.h} ${mx} ${a2.top + a2.h} ${a2.x + NW} ${a2.top + a2.h}`;
+                      if (i > 1) d += ` L ${a2.x} ${a2.top + a2.h}`;
+                    }
+                    return `${d} Z`;
+                  };
+                  const seedMatch = (p: (typeof paths)[number]) => {
+                    const seed = nodeById.get(p.seedId);
+                    if (!seed) return false;
+                    return (
+                      seed.title.toLowerCase().includes(q) ||
+                      (seed.authors ?? "").toLowerCase().includes(q) ||
+                      seed.label.toLowerCase().includes(q)
+                    );
+                  };
+                  const ribbonOpacity = (
+                    p: (typeof paths)[number]
+                  ): number => {
+                    if (flowHover) {
+                      if (flowHover.startsWith("p:")) {
+                        return flowHover === `p:${p.key}` ? 0.85 : 0.1;
+                      }
+                      const [, ai, key] = flowHover.split(":");
+                      return layouts[Number(ai)]?.of(p) === key ? 0.8 : 0.1;
+                    }
+                    if (q) return seedMatch(p) ? 0.85 : 0.07;
+                    if (selectedId) {
+                      return p.seedId === selectedId ? 0.85 : 0.1;
+                    }
+                    return 0.5;
+                  };
+                  const DIR_LABEL: Record<string, string> = {
+                    backward: "backward",
+                    forward: "forward",
+                  };
+                  const CORR_LABEL: Record<string, string> = {
+                    o: "one seed",
+                    s: "2+ seeds",
+                  };
+                  const axisKeyLabel = (ai: number, k: string): string => {
+                    if (ai === 0) return nodeById.get(k)?.label ?? "";
+                    if (ai === 1) return DIR_LABEL[k] ?? k;
+                    if (ai === 2) return CORR_LABEL[k] ?? k;
+                    return STATUS_LABEL[k as MapStatus];
+                  };
+                  const tipFor = (p: (typeof paths)[number]): string[] => [
+                    `${nodeById.get(p.seedId)?.label ?? "seed"} · ${
+                      DIR_LABEL[p.dir]
+                    } · ${CORR_LABEL[p.shared ? "s" : "o"]} · ${
+                      STATUS_LABEL[p.outcome]
+                    }`,
+                    `${p.count} paper(s) on this path`,
+                  ];
+                  const moveTip = (e2: React.PointerEvent) => {
+                    const rect = svgRef.current?.getBoundingClientRect();
+                    if (rect) {
+                      setHoverPos({
+                        x: e2.clientX - rect.left,
+                        y: e2.clientY - rect.top,
+                      });
+                    }
+                  };
+                  const HEADERS = [
+                    "seed papers",
+                    "direction",
+                    "found by",
+                    "outcome",
                   ];
                   return (
                     <g>
-                      {ticks.map((v) => (
-                        <g key={v}>
-                          <line
-                            x1={x(v)}
-                            x2={x(v)}
-                            y1={TOP - 8}
-                            y2={bottom + 8}
-                            stroke={pal.edge}
-                            strokeOpacity={v === 0 ? 0.55 : 0.18}
-                          />
+                      {sorted.map((p, pi) => (
+                        <path
+                          key={p.key}
+                          d={band(segs[pi])}
+                          fill={
+                            p.outcome === "conflict"
+                              ? "url(#snowmap-conflict)"
+                              : pal[p.outcome]
+                          }
+                          fillOpacity={ribbonOpacity(p)}
+                          className="cursor-pointer"
+                          style={{ transition: "fill-opacity 160ms" }}
+                          onClick={() =>
+                            setSelectedId((sel) =>
+                              sel === p.seedId ? null : p.seedId
+                            )
+                          }
+                          onPointerEnter={(e2) => {
+                            setFlowHover(`p:${p.key}`);
+                            setFlowTip(tipFor(p));
+                            moveTip(e2);
+                          }}
+                          onPointerMove={moveTip}
+                          onPointerLeave={() => {
+                            setFlowHover(null);
+                            setFlowTip(null);
+                            setHoverPos(null);
+                          }}
+                        />
+                      ))}
+                      {layouts.map((L, ai) => (
+                        <g key={ai}>
                           <text
-                            x={x(v)}
-                            y={bottom + 26}
+                            x={L.x + NW / 2}
+                            y={TOPY - 18}
                             textAnchor="middle"
-                            fontSize={11}
+                            fontSize={10.5}
+                            letterSpacing="0.08em"
                             fill={pal.label}
+                            style={{ textTransform: "uppercase" }}
                           >
-                            {v}
+                            {HEADERS[ai]}
                           </text>
+                          {L.keys.map((k) => {
+                            const top = L.y0.get(k) ?? TOPY;
+                            const h2 = (L.totals.get(k) ?? 0) * L.unit;
+                            const links = L.totals.get(k) ?? 0;
+                            const uniq =
+                              ai === 3
+                                ? (outcomePapers.get(k as MapStatus)?.size ??
+                                  links)
+                                : links;
+                            return (
+                              <g
+                                key={k}
+                                className="cursor-pointer"
+                                onClick={
+                                  ai === 0
+                                    ? () =>
+                                        setSelectedId((sel) =>
+                                          sel === k ? null : k
+                                        )
+                                    : undefined
+                                }
+                                onPointerEnter={(e2) => {
+                                  setFlowHover(`n:${ai}:${k}`);
+                                  setFlowTip([
+                                    axisKeyLabel(ai, k),
+                                    ai === 3 && uniq !== links
+                                      ? `${uniq} paper(s) · ${links} path(s)`
+                                      : `${links} paper path(s)`,
+                                  ]);
+                                  moveTip(e2);
+                                }}
+                                onPointerMove={moveTip}
+                                onPointerLeave={() => {
+                                  setFlowHover(null);
+                                  setFlowTip(null);
+                                  setHoverPos(null);
+                                }}
+                              >
+                                <rect
+                                  x={L.x}
+                                  y={top}
+                                  width={NW}
+                                  height={Math.max(1.5, h2)}
+                                  rx={3}
+                                  fill={
+                                    ai === 3
+                                      ? k === "conflict"
+                                        ? "url(#snowmap-conflict)"
+                                        : pal[
+                                            k as Exclude<
+                                              MapStatus,
+                                              "conflict"
+                                            >
+                                          ]
+                                      : ai === 0
+                                        ? pal.ink
+                                        : pal.edge
+                                  }
+                                />
+                                {ai === 0 && h2 >= 10 && (
+                                  <text
+                                    x={L.x - 10}
+                                    y={top + h2 / 2 + 4}
+                                    textAnchor="end"
+                                    fontSize={11.5}
+                                    fontWeight={600}
+                                    fill={pal.ink}
+                                  >
+                                    {truncateLabel(
+                                      nodeById.get(k)?.label ?? "",
+                                      28
+                                    )}
+                                  </text>
+                                )}
+                                {ai > 0 && ai < 3 && h2 >= 8 && (
+                                  <text
+                                    x={L.x + NW + 7}
+                                    y={top + h2 / 2 + 4}
+                                    fontSize={11}
+                                    fill={pal.label}
+                                    stroke={pal.surface}
+                                    strokeWidth={3}
+                                    paintOrder="stroke"
+                                  >
+                                    {axisKeyLabel(ai, k)} · {links}
+                                  </text>
+                                )}
+                                {ai === 3 && (
+                                  <text
+                                    x={L.x + NW + 8}
+                                    y={top + Math.max(1.5, h2) / 2 + 4}
+                                    fontSize={11.5}
+                                    fontWeight={600}
+                                    fill={pal.ink}
+                                    stroke={pal.surface}
+                                    strokeWidth={3}
+                                    paintOrder="stroke"
+                                  >
+                                    {axisKeyLabel(ai, k)} · {uniq}
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          })}
                         </g>
                       ))}
-                      <text
-                        x={W - 16}
-                        y={bottom + 26}
-                        textAnchor="end"
-                        fontSize={11}
-                        fill={pal.label}
-                      >
-                        papers found
-                      </text>
-                      {rows.map((r, i) => {
-                        const cy = TOP + i * rowH + rowH / 2;
-                        let acc = 0;
-                        return (
-                          <g
-                            key={r.seed.id}
-                            opacity={emphasis(r.seed)}
-                            className="cursor-pointer"
-                            style={{ transition: "opacity 180ms" }}
-                            onClick={() =>
-                              setSelectedId((sel) =>
-                                sel === r.seed.id ? null : r.seed.id
-                              )
-                            }
-                            onPointerEnter={(e) => {
-                              setHoverId(r.seed.id);
-                              const rect =
-                                svgRef.current?.getBoundingClientRect();
-                              if (rect) {
-                                setHoverPos({
-                                  x: e.clientX - rect.left,
-                                  y: e.clientY - rect.top,
-                                });
-                              }
-                            }}
-                            onPointerLeave={() => {
-                              setHoverId(null);
-                              setHoverPos(null);
-                            }}
-                          >
-                            <rect
-                              x={0}
-                              y={cy - rowH / 2}
-                              width={W}
-                              height={rowH}
-                              fill="transparent"
-                            />
-                            <text
-                              x={GUT - 12}
-                              y={cy + 4}
-                              textAnchor="end"
-                              fontSize={12}
-                              fontWeight={600}
-                              fill={pal.ink}
-                            >
-                              {truncateLabel(r.seed.label, 28)}
-                            </text>
-                            {order.map((s) => {
-                              const v = r.counts[s];
-                              if (v === 0) return null;
-                              const x1 = x(acc);
-                              acc += v;
-                              const w = x(acc) - x1;
-                              const drawn = Math.max(2, w - 2);
-                              return (
-                                <g key={s}>
-                                  <rect
-                                    x={x1}
-                                    y={cy - barH / 2}
-                                    width={drawn}
-                                    height={barH}
-                                    fill={
-                                      s === "conflict"
-                                        ? "url(#snowmap-conflict)"
-                                        : pal[s]
-                                    }
-                                  />
-                                  {drawn >= 26 && (
-                                    <text
-                                      x={x1 + drawn / 2}
-                                      y={cy + 3.5}
-                                      textAnchor="middle"
-                                      fontSize={10}
-                                      fontWeight={600}
-                                      fill="#ffffff"
-                                    >
-                                      {v}
-                                    </text>
-                                  )}
-                                </g>
-                              );
-                            })}
-                            <text
-                              x={x(r.total) + 8}
-                              y={cy + 4}
-                              fontSize={11.5}
-                              fill={pal.label}
-                              className="tabular-nums"
-                            >
-                              {r.total}
-                            </text>
-                          </g>
-                        );
-                      })}
-                      {rows.every((r) => r.total === 0) && (
-                        <text
-                          x={GUT + innerW / 2}
-                          y={TOP + (bottom - TOP) / 2}
-                          textAnchor="middle"
-                          fontSize={13}
-                          fill={pal.label}
-                        >
-                          No links match the current filters.
-                        </text>
-                      )}
                     </g>
                   );
                 })()
@@ -1128,18 +1379,30 @@ export default function SnowballMap({ project }: { project: Project }) {
                   const d = edgePath(e);
                   if (!d) return null;
                   const em = edgeEmphasis(e);
+                  // A seed citing another seed is the strongest signal
+                  // on the map: both papers made the final set, so the
+                  // connection gets a heavier line and a bolder arrow.
+                  const seedToSeed = nodeById.get(e.recordId)?.isSeed;
                   return (
                     <path
                       key={e.id}
                       d={d}
                       fill="none"
-                      stroke={pal.edge}
-                      strokeWidth={em.width}
-                      strokeOpacity={em.opacity}
+                      stroke={seedToSeed ? pal.ink : pal.edge}
+                      strokeWidth={seedToSeed ? em.width * 1.35 : em.width}
+                      strokeOpacity={
+                        // Boost only the idle state; focus dimming and
+                        // highlighting still apply to seed links.
+                        seedToSeed && em.opacity === 0.5 ? 0.68 : em.opacity
+                      }
                       strokeDasharray={
                         e.direction === "forward" ? "5 4" : undefined
                       }
-                      markerEnd="url(#snowmap-arrow)"
+                      markerEnd={
+                        seedToSeed
+                          ? "url(#snowmap-arrow-seed)"
+                          : "url(#snowmap-arrow)"
+                      }
                       style={{ transition: "stroke-opacity 180ms" }}
                     />
                   );
@@ -1248,6 +1511,25 @@ export default function SnowballMap({ project }: { project: Project }) {
             </div>
             )}
 
+            {layout === "yield" && flowTip && hoverPos && (
+              <div
+                className="pointer-events-none absolute z-10 max-w-80 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
+                style={{
+                  left: Math.min(hoverPos.x + 14, 860),
+                  top: hoverPos.y + 10,
+                }}
+              >
+                <p className="mb-0.5 font-medium text-zinc-900 dark:text-zinc-50">
+                  {flowTip[0]}
+                </p>
+                {flowTip.slice(1).map((line) => (
+                  <p key={line} className="text-zinc-600 dark:text-zinc-400">
+                    {line}
+                  </p>
+                ))}
+              </div>
+            )}
+
             {hovered && hoverPos && !draggingNode && (
               <div
                 className="pointer-events-none absolute z-10 max-w-72 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
@@ -1263,29 +1545,9 @@ export default function SnowballMap({ project }: { project: Project }) {
                   {[hovered.authors, hovered.year].filter(Boolean).join(" · ")}
                 </p>
                 <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                  {layout === "yield" && hovered.isSeed
-                    ? (() => {
-                        const row = yieldRows.rows.find(
-                          (r) => r.seed.id === hovered.id
-                        );
-                        if (!row) return "Seed paper";
-                        const parts = (
-                          [
-                            "included",
-                            "conflict",
-                            "excluded",
-                            "screening",
-                          ] as MapStatus[]
-                        )
-                          .filter((s) => row.counts[s] > 0)
-                          .map((s) => `${row.counts[s]} ${STATUS_LABEL[s]}`);
-                        return `Found ${row.total} paper(s)${
-                          parts.length > 0 ? `: ${parts.join(", ")}` : ""
-                        }`;
-                      })()
-                    : hovered.isSeed
-                      ? `Seed paper · ${hovered.degree} connection(s)`
-                      : `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`}
+                  {hovered.isSeed
+                    ? `Seed paper · ${hovered.degree} connection(s)`
+                    : `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`}
                 </p>
               </div>
             )}
@@ -1402,9 +1664,9 @@ export default function SnowballMap({ project }: { project: Project }) {
             </span>
             <span className="ml-auto">
               {layout === "yield"
-                ? `each bar counts the papers that seed's searches found${
-                    yieldRows.overlap > 0
-                      ? "; a paper found from several seeds counts in each bar"
+                ? `ribbons stream each seed's finds into their outcome${
+                    flow.sharedPapers > 0
+                      ? `; ${flow.sharedPapers} paper(s) found by several seeds travel one ribbon per seed`
                       : ""
                   }`
                 : "arrows point at the cited work"}
