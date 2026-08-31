@@ -639,6 +639,12 @@ export default function SnowballMap({ project }: { project: Project }) {
       if (!directionPass(e)) return;
       const cand = nodeById.get(e.recordId);
       if (!cand || !statusOn[cand.status]) return;
+      // Only papers snowballing itself brought into the corpus count
+      // here. A citation landing on a record the database search
+      // already contributed (a seed citing another seed is the common
+      // case) is real structure for the map, but it is a rediscovery,
+      // not a snowball find, and must not inflate the flow's totals.
+      if (!cand.snowballed) return;
       if (scope === "ta" && !cand.taIncluded) return;
       const s = seedsOf.get(e.recordId) ?? new Set<string>();
       s.add(e.seedId);
@@ -1540,7 +1546,9 @@ export default function SnowballMap({ project }: { project: Project }) {
                 <p className="mt-1 text-zinc-600 dark:text-zinc-400">
                   {hovered.isSeed
                     ? `Seed paper · ${hovered.degree} connection(s)`
-                    : `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`}
+                    : hovered.snowballed
+                      ? `${STATUS_LABEL[hovered.status]} · via ${SOURCE_LABEL[hovered.source]} · found from ${hovered.degree} seed(s)`
+                      : `${STATUS_LABEL[hovered.status]} · already in the corpus before snowballing · cited in ${hovered.degree} seed connection(s)`}
                 </p>
               </div>
             )}
@@ -1565,7 +1573,9 @@ export default function SnowballMap({ project }: { project: Project }) {
                 <p className="mb-2 text-xs text-zinc-700 dark:text-zinc-300">
                   {selected.isSeed
                     ? "Seed paper (included after full text)"
-                    : `${STATUS_LABEL[selected.status]} · entered via ${SOURCE_LABEL[selected.source]}`}
+                    : selected.snowballed
+                      ? `${STATUS_LABEL[selected.status]} · entered via ${SOURCE_LABEL[selected.source]}`
+                      : `${STATUS_LABEL[selected.status]} · already in the corpus before snowballing (this citation link is context, not a snowball find)`}
                 </p>
                 {selectedEdges.length > 0 && (
                   <div className="mb-2 max-h-40 overflow-y-auto text-xs text-zinc-600 dark:text-zinc-400">
@@ -1657,7 +1667,7 @@ export default function SnowballMap({ project }: { project: Project }) {
             </span>
             <span className="ml-auto">
               {layout === "yield"
-                ? `ribbons stream each seed's finds into their outcome${
+                ? `ribbons count only papers snowballing itself added to the corpus${
                     flow.sharedPapers > 0
                       ? `; ${flow.sharedPapers} paper(s) found by several seeds are counted under the seed that found them first`
                       : ""

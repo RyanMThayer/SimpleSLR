@@ -31,6 +31,11 @@ export type SnowballNode = {
   /** Title/abstract screening settled include (seeds trivially true),
    * regardless of where full text screening stands. */
   taIncluded: boolean;
+  /** True when the record itself was CREATED by a snowball import.
+   * False means the corpus already held it (database search arm), so
+   * a citation link to it is a rediscovery, not a snowball find: the
+   * map draws it, the flow view must never count it. */
+  snowballed: boolean;
   source: SourceKind;
   degree: number;
   /** "Webster 2002" style label for direct labeling on the map. */
@@ -230,6 +235,10 @@ export function buildSnowballGraph(input: {
       isSeed,
       status: statusOf(rec),
       taIncluded: isSeed || (taPassedOf?.(rec) ?? false),
+      snowballed: Boolean(
+        rec.batch_id &&
+          batches.get(rec.batch_id)?.origin?.startsWith("snowball")
+      ),
       source: isSeed
         ? "screening"
         : sourceKindOf(rec.batch_id ? batches.get(rec.batch_id) : undefined),
