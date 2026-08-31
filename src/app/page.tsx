@@ -9,8 +9,8 @@ import { isSupabaseConfigured } from "@/lib/supabase/server";
 
 const FEATURES = [
   {
-    title: "PRISMA 2020, built in",
-    body: "Screen with per criterion hotkeys and a complete audit trail, then export the verbatim PRISMA flow diagram, a written summary, and the screening log.",
+    title: "PRISMA 2020 screening and reporting",
+    body: "Screening with per criterion hotkeys and a complete audit trail; exports include the verbatim PRISMA flow diagram, a written summary, and the screening log.",
   },
   {
     title: "Independent screening",
@@ -25,12 +25,12 @@ const FEATURES = [
     body: "A Webster and Watson concept matrix wired to a PDF reading room: verbatim excerpts, anchored quotes, and per concept exports.",
   },
   {
-    title: "AI that stays defensible",
-    body: "Optional prescreening and concept suggestions, run with your own API key under a prescribed methodology. Unanimous multi pass removal rules, every vote auditable, disclosure text written for your methods section.",
+    title: "Optional AI assistance",
+    body: "A prescreen and concept suggestions, run with your own API key under a prescribed methodology: unanimous multi pass removal rules, auditable votes, and disclosure text for the methods section.",
   },
   {
-    title: "Private by design",
-    body: "No ads, no analytics, no fees. API keys never leave your browser, uploaded PDFs stay private to your team, and your data exports as CSV at any time.",
+    title: "Privacy and data handling",
+    body: "The site serves no ads and runs no analytics. API keys are stored only in your browser, uploaded PDFs are visible only to your project team, and review data exports as CSV at any time.",
   },
 ];
 
@@ -45,7 +45,7 @@ const STEPS = [
   },
   {
     title: "Snowball",
-    body: "Citation search outward from everything that survived.",
+    body: "Citation search outward from the included papers.",
   },
   {
     title: "Synthesize",
@@ -86,17 +86,14 @@ export default function Home() {
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-6">
         <section className="mx-auto max-w-3xl pt-14 pb-16 text-center sm:pt-20">
-          <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-teal-700 dark:text-teal-400">
-            Free for research teams · No ads, no tracking
-          </p>
           <h1 className="text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl sm:leading-[1.1] dark:text-zinc-50">
             Systematic literature reviews, from search to synthesis
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            SimpleSLR is a collaborative tool for PRISMA 2020 screening,
-            snowballing, and the Webster and Watson concept matrix.
-            Everything your methods section needs, nothing your team has
-            to pay for.
+            SimpleSLR is a free collaborative tool for PRISMA 2020
+            screening, snowballing, and the Webster and Watson concept
+            matrix. It keeps each step of a review documented, from the
+            first database export to the final flow diagram.
           </p>
           {configured ? (
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -110,7 +107,7 @@ export default function Home() {
                 href="#features"
                 className="flex h-12 items-center rounded-full border border-zinc-300 px-8 text-base font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
-                What is inside
+                Features
               </a>
             </div>
           ) : (
@@ -143,7 +140,7 @@ export default function Home() {
 
         <section id="features" className="py-16">
           <h2 className="mb-8 text-center text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Built for the whole review, not just the screening
+            What SimpleSLR covers
           </h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
@@ -165,18 +162,18 @@ export default function Home() {
         {configured && (
           <section className="mb-16 rounded-2xl border border-zinc-200 bg-white px-6 py-10 text-center dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-              Free forever
+              Free to use
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Bring your own API key if you want the optional AI
-              assistance, or use none at all. Either way, the review
-              costs your team nothing.
+              SimpleSLR is free for any research team. The optional AI
+              features run on your own Anthropic or OpenAI API key;
+              nothing else requires payment.
             </p>
             <Link
               href="/login"
               className="mt-6 inline-flex h-11 items-center rounded-full bg-teal-700 px-8 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             >
-              Create your account
+              Create an account
             </Link>
           </section>
         )}
