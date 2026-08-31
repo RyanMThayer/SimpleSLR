@@ -9,11 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/ibm-plex-serif": "^5.3.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.2",
     "@types/d3-force": "^3.0.10",
     "d3-force": "^3.0.0",
-    "geist": "^1.7.2",
     "next": "16.3.0",
     "pdfjs-dist": "^6.2.108",
     "pptxgenjs": "^4.0.1",
