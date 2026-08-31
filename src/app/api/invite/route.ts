@@ -68,8 +68,10 @@ export async function POST(req: Request) {
     });
   }
   const origin = new URL(req.url).origin;
+  // Invited users arrive authenticated but without a password; landing
+  // on the reset page lets them set one before anything else.
   const { error: mailErr } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: origin,
+    redirectTo: `${origin}/reset-password`,
   });
   if (mailErr) {
     const already = /already.*(registered|exists)/i.test(mailErr.message);

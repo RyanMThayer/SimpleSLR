@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { passwordChecks, passwordOk, strengthLabel } from "@/lib/password";
 
@@ -205,6 +207,19 @@ export default function LoginPage() {
                         ? `Send again in ${cooldown}s`
                         : "Send reset link"}
               </button>
+              {mode === "signup" && (
+                <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
+                  By creating an account you agree to the{" "}
+                  <Link href="/terms" className="underline underline-offset-2">
+                    terms
+                  </Link>{" "}
+                  and the{" "}
+                  <Link href="/privacy" className="underline underline-offset-2">
+                    privacy policy
+                  </Link>
+                  .
+                </p>
+              )}
             </form>
             {mode === "forgot" && resetSent && (
               <div className="w-full rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-left text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100">
@@ -268,10 +283,17 @@ export default function LoginPage() {
                     ? "Already have an account? Sign in"
                     : "Back to sign in"}
               </button>
+              <a
+                href="mailto:support@simpleslr.de"
+                className="text-xs text-zinc-400 underline underline-offset-4 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              >
+                Trouble signing in? support@simpleslr.de
+              </a>
             </div>
           </>
         )}
       </main>
+      <SiteFooter />
     </div>
   );
 }

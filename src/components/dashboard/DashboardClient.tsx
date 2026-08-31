@@ -20,6 +20,10 @@ export default function DashboardClient({ userId }: { userId: string }) {
   const [showJoin, setShowJoin] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   // A freshly minted sign in token can be rejected for a short window
   // (clock skew between Supabase's auth and data services). The fetch
   // layer already absorbs small skews; this counter keeps retrying
@@ -132,6 +136,30 @@ export default function DashboardClient({ userId }: { userId: string }) {
     router.push(`/projects/${data}`);
   }
 
+  async function deleteAccount() {
+    if (deleteBusy || deleteConfirm !== "DELETE") return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: deleteConfirm }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!data || data.error) {
+        setDeleteError(data?.error ?? "The account could not be deleted.");
+        setDeleteBusy(false);
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch {
+      setDeleteError("The account could not be deleted.");
+      setDeleteBusy(false);
+    }
+  }
+
   const inputCls =
     "h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
   const primaryBtn =
@@ -225,6 +253,50 @@ export default function DashboardClient({ userId }: { userId: string }) {
           ))}
         </div>
       )}
+
+      <div className="mt-16 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+        <button
+          onClick={() => {
+            setShowDelete(!showDelete);
+            setDeleteConfirm("");
+            setDeleteError(null);
+          }}
+          className="text-xs text-zinc-400 underline underline-offset-4 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+        >
+          Delete my account
+        </button>
+        {showDelete && (
+          <div className="mt-3 flex max-w-xl flex-col gap-3 rounded-xl border border-red-200 bg-white p-4 text-sm dark:border-red-900 dark:bg-zinc-900">
+            <p className="text-zinc-700 dark:text-zinc-300">
+              This permanently deletes reviews where you are the only
+              member, including uploaded PDFs, and removes you from team
+              reviews. Your name and email are erased; screening work in
+              team reviews stays attributed to an anonymous &quot;Deleted
+              user&quot; so your teammates&apos; audit trail survives. If
+              you are the only owner of a team review, make a teammate an
+              owner first (or delete that review). This cannot be undone.
+            </p>
+            <div className="flex gap-1.5">
+              <input
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder='Type "DELETE" to confirm'
+                className="h-9 min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-red-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+              />
+              <button
+                onClick={deleteAccount}
+                disabled={deleteBusy || deleteConfirm !== "DELETE"}
+                className="rounded-full border border-red-300 px-4 text-sm text-red-700 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+              >
+                {deleteBusy ? "Deleting..." : "Delete account"}
+              </button>
+            </div>
+            {deleteError && (
+              <p className="text-red-600 dark:text-red-400">{deleteError}</p>
+            )}
+          </div>
+        )}
+      </div>
     </main>
   );
 }

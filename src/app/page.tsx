@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 
 export default function Home() {
@@ -28,6 +29,7 @@ export default function Home() {
           </div>
         )}
       </main>
+      <SiteFooter />
     </div>
   );
 }

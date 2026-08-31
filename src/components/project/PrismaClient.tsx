@@ -1404,6 +1404,15 @@ export default function PrismaClient({ project }: { project: Project }) {
                   when they were actually used.
                 </p>
               </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Questions about any of these procedures:{" "}
+                <a
+                  href="mailto:support@simpleslr.de"
+                  className="underline underline-offset-2"
+                >
+                  support@simpleslr.de
+                </a>
+              </p>
             </div>
           </section>
         </>
