@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
@@ -8,6 +8,48 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { passwordChecks, passwordOk, strengthLabel } from "@/lib/password";
 
 type Mode = "signin" | "signup" | "forgot";
+
+// Google Identity Services: the sign in runs on THIS origin via an ID
+// token (signInWithIdToken), so Google's popup references simpleslr.de
+// instead of the Supabase project domain the redirect flow would show.
+// The client id is public by design; without it the redirect flow
+// button below is the fallback.
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: {
+            client_id: string;
+            nonce?: string;
+            callback: (response: { credential: string }) => void;
+          }) => void;
+          renderButton: (
+            element: HTMLElement,
+            config: Record<string, unknown>
+          ) => void;
+        };
+      };
+    };
+  }
+}
+
+// Raw nonce goes to Supabase, its SHA-256 hex goes to Google; Supabase
+// verifies the pair, which stops a captured ID token being replayed.
+async function makeNonce() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const raw = btoa(String.fromCharCode(...bytes));
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(raw)
+  );
+  const hashed = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return { raw, hashed };
+}
 
 function GoogleG() {
   return (
@@ -49,6 +91,77 @@ export default function LoginPage() {
   const [resetSent, setResetSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const configured = isSupabaseConfigured();
+  // Google Identity Services state: script loaded, container, nonce.
+  const [gsiLoaded, setGsiLoaded] = useState(false);
+  // Until Google's button has actually rendered, the classic redirect
+  // flow button stands in, so a blocked or failed script never leaves
+  // a hole where sign in should be.
+  const [gsiRendered, setGsiRendered] = useState(false);
+  const gsiDiv = useRef<HTMLDivElement | null>(null);
+  const nonceRef = useRef<{ raw: string; hashed: string } | null>(null);
+
+  useEffect(() => {
+    if (!configured || !GOOGLE_CLIENT_ID) return;
+    if (document.getElementById("gsi-client")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setGsiLoaded(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.id = "gsi-client";
+    script.async = true;
+    script.onload = () => setGsiLoaded(true);
+    document.head.appendChild(script);
+  }, [configured]);
+
+  useEffect(() => {
+    if (!gsiLoaded || !GOOGLE_CLIENT_ID || mode === "forgot") return;
+    const el = gsiDiv.current;
+    if (!el) return;
+    let cancelled = false;
+    (async () => {
+      if (!nonceRef.current) nonceRef.current = await makeNonce();
+      if (cancelled || !window.google) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        nonce: nonceRef.current.hashed,
+        callback: async (response) => {
+          setLoading(true);
+          setMessage(null);
+          const supabase = createClient();
+          const { error } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token: response.credential,
+            nonce: nonceRef.current?.raw,
+          });
+          if (error) {
+            setMessage(error.message);
+            setLoading(false);
+            return;
+          }
+          router.push("/dashboard");
+          router.refresh();
+        },
+      });
+      el.innerHTML = "";
+      window.google.accounts.id.renderButton(el, {
+        type: "standard",
+        theme: document.documentElement.classList.contains("dark")
+          ? "filled_black"
+          : "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "pill",
+        width: Math.min(400, el.offsetWidth || 336),
+      });
+      setGsiRendered(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gsiLoaded, mode]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -186,15 +299,27 @@ export default function LoginPage() {
 
               {mode !== "forgot" && (
                 <>
-                  <button
-                    type="button"
-                    onClick={signInWithGoogle}
-                    disabled={loading}
-                    className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                  >
-                    <GoogleG />
-                    Continue with Google
-                  </button>
+                  {GOOGLE_CLIENT_ID && (
+                    <div
+                      ref={gsiDiv}
+                      className={
+                        gsiRendered
+                          ? "flex min-h-11 w-full justify-center"
+                          : "hidden"
+                      }
+                    />
+                  )}
+                  {!gsiRendered && (
+                    <button
+                      type="button"
+                      onClick={signInWithGoogle}
+                      disabled={loading}
+                      className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <GoogleG />
+                      Continue with Google
+                    </button>
+                  )}
                   <div className="flex w-full items-center gap-3 text-xs uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                     <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
                     or

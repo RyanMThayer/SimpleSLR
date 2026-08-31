@@ -8,6 +8,9 @@ import type { NextConfig } from "next";
 // because the theme boot script and Next's own hydration payload are
 // inline; nonce-based CSP would need a proxy layer we don't otherwise
 // want. 'wasm-unsafe-eval' is for pdf.js's WebAssembly image decoders.
+// The accounts.google.com/gsi/ entries are Google Identity Services
+// (the Sign in with Google button on the login page), exactly the
+// sources Google's CSP guide prescribes and nothing broader.
 const supabaseOrigin = (() => {
   try {
     return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").origin;
@@ -18,17 +21,17 @@ const supabaseOrigin = (() => {
 const dev = process.env.NODE_ENV === "development";
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${dev ? " 'unsafe-eval'" : ""}`,
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client${dev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace(
     "https://",
     "wss://"
-  )}${dev ? " ws:" : ""}`,
+  )} https://accounts.google.com/gsi/${dev ? " ws:" : ""}`,
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "object-src 'none'",
-  "frame-src 'none'",
+  "frame-src https://accounts.google.com/gsi/",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
