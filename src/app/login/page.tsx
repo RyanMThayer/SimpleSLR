@@ -9,6 +9,29 @@ import { passwordChecks, passwordOk, strengthLabel } from "@/lib/password";
 
 type Mode = "signin" | "signup" | "forgot";
 
+function GoogleG() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("signin");
@@ -97,6 +120,26 @@ export default function LoginPage() {
     }
   }
 
+  async function signInWithGoogle() {
+    if (loading) return;
+    setLoading(true);
+    setMessage(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) {
+      setLoading(false);
+      setMessage(
+        /provider/i.test(error.message)
+          ? "Google sign in is not enabled yet. Use email and password for now."
+          : error.message
+      );
+    }
+    // On success the browser navigates to Google; nothing to do here.
+  }
+
   async function resendConfirmation() {
     if (!awaiting || resendBusy) return;
     setResendBusy(true);
@@ -112,16 +155,19 @@ export default function LoginPage() {
     );
   }
 
+  const inputCls =
+    "h-11 rounded-lg border border-zinc-300 bg-white px-3 text-base text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-teal-600";
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 font-sans dark:bg-zinc-950">
-      <main className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          {mode === "signin"
-            ? "Sign in to SimpleSLR"
-            : mode === "signup"
-              ? "Create your account"
-              : "Reset your password"}
-        </h1>
+    <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-10 font-sans dark:bg-zinc-950">
+      <main className="flex w-full max-w-sm flex-col items-center gap-5">
+        <Link
+          href="/"
+          className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+        >
+          SimpleSLR
+        </Link>
+
         {!configured ? (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
             Backend not configured yet. Add the Supabase environment variables
@@ -129,98 +175,137 @@ export default function LoginPage() {
           </div>
         ) : (
           <>
-            <form
-              onSubmit={handleSubmit}
-              className="flex w-full flex-col gap-3 text-left"
-            >
-              <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Email
-                <input
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-base text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-teal-600"
-                />
-              </label>
-              {mode === "forgot" ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Enter your account email and we will send a link to set a
-                  new password.
-                </p>
-              ) : (
+            <div className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <h1 className="text-center text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                {mode === "signin"
+                  ? "Sign in"
+                  : mode === "signup"
+                    ? "Create your account"
+                    : "Reset your password"}
+              </h1>
+
+              {mode !== "forgot" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={signInWithGoogle}
+                    disabled={loading}
+                    className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <GoogleG />
+                    Continue with Google
+                  </button>
+                  <div className="flex w-full items-center gap-3 text-xs uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                    <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                    or
+                    <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                  </div>
+                </>
+              )}
+
+              <form
+                onSubmit={handleSubmit}
+                className="flex w-full flex-col gap-3 text-left"
+              >
                 <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Password
+                  Email
                   <input
-                    type="password"
+                    type="email"
                     required
-                    minLength={mode === "signup" ? 8 : 6}
-                    autoComplete={
-                      mode === "signin" ? "current-password" : "new-password"
-                    }
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-base text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-teal-600"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={inputCls}
                   />
                 </label>
-              )}
-              {mode === "signup" && (
-                <div className="rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-900">
-                  {passwordChecks(password, email).map((c) => (
-                    <p
-                      key={c.label}
-                      className={
-                        c.ok
-                          ? "text-teal-700 dark:text-teal-300"
-                          : "text-zinc-500 dark:text-zinc-400"
+                {mode === "forgot" ? (
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Enter your account email and we will send a link to set a
+                    new password.
+                  </p>
+                ) : (
+                  <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Password
+                    <input
+                      type="password"
+                      required
+                      minLength={mode === "signup" ? 8 : 6}
+                      autoComplete={
+                        mode === "signin" ? "current-password" : "new-password"
                       }
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className={inputCls}
+                    />
+                  </label>
+                )}
+                {mode === "signup" && (
+                  <div className="rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-950">
+                    {passwordChecks(password, email).map((c) => (
+                      <p
+                        key={c.label}
+                        className={
+                          c.ok
+                            ? "text-teal-700 dark:text-teal-300"
+                            : "text-zinc-500 dark:text-zinc-400"
+                        }
+                      >
+                        {c.ok ? "✓" : "·"} {c.label}
+                      </p>
+                    ))}
+                    {password.length > 0 && passwordOk(password, email) && (
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        Strength: {strengthLabel(password)}
+                        {strengthLabel(password) !== "strong" &&
+                          " · longer with mixed case or symbols is stronger"}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  disabled={
+                    loading ||
+                    (mode === "signup" && !passwordOk(password, email)) ||
+                    (mode === "forgot" && cooldown > 0)
+                  }
+                  className="mt-1 flex h-11 items-center justify-center rounded-full bg-teal-700 px-6 text-base font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                >
+                  {loading
+                    ? "Please wait..."
+                    : mode === "signin"
+                      ? "Sign in"
+                      : mode === "signup"
+                        ? "Create account"
+                        : cooldown > 0
+                          ? `Send again in ${cooldown}s`
+                          : "Send reset link"}
+                </button>
+                {mode === "signup" && (
+                  <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
+                    By creating an account you agree to the{" "}
+                    <Link href="/terms" className="underline underline-offset-2">
+                      terms
+                    </Link>{" "}
+                    and the{" "}
+                    <Link
+                      href="/privacy"
+                      className="underline underline-offset-2"
                     >
-                      {c.ok ? "✓" : "·"} {c.label}
-                    </p>
-                  ))}
-                  {password.length > 0 && passwordOk(password, email) && (
-                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Strength: {strengthLabel(password)}
-                      {strengthLabel(password) !== "strong" &&
-                        " · longer with mixed case or symbols is stronger"}
-                    </p>
-                  )}
-                </div>
-              )}
-              <button
-                type="submit"
-                disabled={
-                  loading ||
-                  (mode === "signup" && !passwordOk(password, email)) ||
-                  (mode === "forgot" && cooldown > 0)
-                }
-                className="mt-2 flex h-11 items-center justify-center rounded-full bg-teal-700 px-6 text-base font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
-              >
-                {loading
-                  ? "Please wait..."
-                  : mode === "signin"
-                    ? "Sign in"
-                    : mode === "signup"
-                      ? "Create account"
-                      : cooldown > 0
-                        ? `Send again in ${cooldown}s`
-                        : "Send reset link"}
-              </button>
-              {mode === "signup" && (
-                <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
-                  By creating an account you agree to the{" "}
-                  <Link href="/terms" className="underline underline-offset-2">
-                    terms
-                  </Link>{" "}
-                  and the{" "}
-                  <Link href="/privacy" className="underline underline-offset-2">
-                    privacy policy
-                  </Link>
-                  .
+                      privacy policy
+                    </Link>
+                    .
+                  </p>
+                )}
+              </form>
+
+              {message && (
+                <p className="text-center text-sm text-zinc-700 dark:text-zinc-300">
+                  {message}
                 </p>
               )}
-            </form>
+            </div>
+
             {mode === "forgot" && resetSent && (
               <div className="w-full rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-left text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100">
                 If an account exists for <strong>{email}</strong>, a password
@@ -232,7 +317,7 @@ export default function LoginPage() {
             {awaiting && (
               <div className="w-full rounded-xl border border-teal-300 bg-teal-50 px-4 py-3 text-left text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100">
                 <p className="mb-1 font-semibold">
-                  Almost there — confirm your email.
+                  Almost there: confirm your email.
                 </p>
                 <p className="mb-2">
                   A confirmation link was sent to <strong>{awaiting}</strong>.
@@ -251,11 +336,7 @@ export default function LoginPage() {
                 {resendMsg && <p className="mt-1.5 text-xs">{resendMsg}</p>}
               </div>
             )}
-            {message && (
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                {message}
-              </p>
-            )}
+
             <div className="flex flex-col items-center gap-2">
               {mode === "signin" && (
                 <button
