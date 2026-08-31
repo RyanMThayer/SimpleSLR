@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import StageTabs from "@/components/project/StageTabs";
 import { createClient } from "@/lib/supabase/client";
 import { btnSecondarySm as btn } from "@/lib/ui";
 import { plausibleAbstract } from "@/lib/abstracts";
@@ -229,6 +230,21 @@ export default function DuplicatesClient({
   
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
+      <StageTabs
+        stage="Records"
+        tabs={[
+          {
+            href: `/projects/${projectId}/records`,
+            label: "All records",
+            active: false,
+          },
+          {
+            href: `/projects/${projectId}/duplicates`,
+            label: "Duplicates",
+            active: true,
+          },
+        ]}
+      />
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Possible duplicates
       </h1>

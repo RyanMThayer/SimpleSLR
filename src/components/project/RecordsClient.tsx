@@ -8,6 +8,7 @@ import {
   settledOutcome,
   stageStatus,
 } from "@/lib/outcomes";
+import StageTabs from "@/components/project/StageTabs";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import { matchCriterionLine } from "@/lib/prescreen";
 import {
@@ -1387,6 +1388,21 @@ export default function RecordsClient({
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
+      <StageTabs
+        stage="Records"
+        tabs={[
+          {
+            href: `/projects/${projectId}/records`,
+            label: "All records",
+            active: true,
+          },
+          {
+            href: `/projects/${projectId}/duplicates`,
+            label: "Duplicates",
+            active: false,
+          },
+        ]}
+      />
       <input
         type="file"
         accept="application/pdf,.pdf"

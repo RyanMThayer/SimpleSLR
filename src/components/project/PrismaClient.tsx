@@ -1151,11 +1151,14 @@ export default function PrismaClient({ project }: { project: Project }) {
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        PRISMA and exports
+        Report
       </h1>
       <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
-        Every number here is computed live from the records and decisions;
-        nothing is entered by hand.
+        Everything the review produces, in one place: the PRISMA 2020 flow
+        diagram, the written methods summary, the exports, and a description
+        of the methodology behind this tool for citing and reporting. Every
+        number is computed live from the records and decisions; nothing is
+        entered by hand.
       </p>
 
       {error && (
@@ -1275,6 +1278,8 @@ export default function PrismaClient({ project }: { project: Project }) {
               The RIS files import directly into Zotero or Mendeley for full
               text reading and citing. The backup JSON contains the complete
               project; download one after every serious screening session.
+              The concept matrix and excerpt CSVs live beside the matrix on
+              the Synthesize page.
             </p>
             <div className="flex flex-wrap gap-2">
               <button onClick={exportBackup} className={exportBtn}>
@@ -1300,6 +1305,105 @@ export default function PrismaClient({ project }: { project: Project }) {
               <button onClick={exportLogCsv} className={exportBtn}>
                 Screening log (CSV)
               </button>
+            </div>
+          </section>
+
+          <section className={`${card} mt-6`}>
+            <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              How SimpleSLR works, for your methods section
+            </h2>
+            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+              The procedures below describe what this tool actually does, so
+              reviewers of your manuscript can verify the process. Cite
+              SimpleSLR with the version date and reproduce whichever
+              descriptions apply to your review.
+            </p>
+            <div className="flex flex-col gap-3 text-sm text-zinc-700 dark:text-zinc-300">
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Identification and deduplication
+                </h3>
+                <p>
+                  Records enter from database exports (RIS, BibTeX, CSV),
+                  citation searching, or manual entry, each carrying its
+                  source. Duplicates are detected by DOI match or by
+                  normalized title match corroborated by a shared author or
+                  matching year, are reviewed by the team, and are merged
+                  toward a single kept record.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Screening
+                </h3>
+                <p>
+                  Two stages (title/abstract, then full text) against the
+                  recorded inclusion criteria and the exclusion reasons
+                  list. With independent screening on, each record requires
+                  the configured number of independent opinions before a
+                  team outcome exists; reviewers cannot see one another&apos;s
+                  decisions until then, and disagreements are resolved after
+                  discussion, with the resolution logged. Every opinion and
+                  resolution is timestamped in the exportable screening log.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Automated prescreening (optional)
+                </h3>
+                <p>
+                  When enabled, each unscreened title and abstract is judged
+                  by five procedurally distinct prompts on fixed, prescribed
+                  language models at temperature zero. A record is removed
+                  only when all five votes conclude exclude, cite the same
+                  criterion from the project&apos;s own list, and quote verbatim
+                  evidence from the record&apos;s text, and a final adversarial
+                  check finds no plausible eligible reading. Errors and
+                  ambiguity default to human screening; removals are counted
+                  on the PRISMA line for automation tools, remain visible
+                  with their full vote record, and are restorable. A
+                  validation mode replays the pipeline on human-screened
+                  records to measure agreement before live use.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Citation searching
+                </h3>
+                <p>
+                  Backward and forward snowballing from the included set
+                  (Webster and Watson), via OpenAlex or database exports,
+                  with per-seed provenance recorded. Papers already in the
+                  corpus are consolidated onto their existing record rather
+                  than duplicated, and identification counts follow the
+                  PRISMA 2020 two-arm layout.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Synthesis
+                </h3>
+                <p>
+                  Concept-centric coding in the Webster and Watson style:
+                  passages are anchored verbatim to the source PDF, and the
+                  concept matrix is built from those anchored excerpts.
+                  Optional AI-suggested passages are quarantined until a
+                  researcher individually accepts or rejects each one, and
+                  suggested quotes are verified verbatim against the
+                  extracted text before they can appear.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                  Reporting
+                </h3>
+                <p>
+                  The PRISMA 2020 flow diagram and the written summary above
+                  are computed from the recorded decisions, count only
+                  settled team outcomes, and report optional features only
+                  when they were actually used.
+                </p>
+              </div>
             </div>
           </section>
         </>

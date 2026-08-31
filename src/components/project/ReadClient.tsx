@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import StageTabs from "@/components/project/StageTabs";
 import { createClient } from "@/lib/supabase/client";
 import {
   awaitingTeammates,
@@ -1665,6 +1666,21 @@ export default function ReadClient({
 
   return (
     <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col px-4 py-4">
+      <StageTabs
+        stage="Synthesize"
+        tabs={[
+          {
+            href: `/projects/${project.id}/read`,
+            label: "Reading room",
+            active: true,
+          },
+          {
+            href: `/projects/${project.id}/concepts`,
+            label: "Concept matrix",
+            active: false,
+          },
+        ]}
+      />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           Reading room

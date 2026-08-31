@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import StageTabs from "@/components/project/StageTabs";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
 import { awaitingTeammates, requiredFor, settledOutcome } from "@/lib/outcomes";
@@ -633,9 +634,25 @@ export default function ConceptsClient({
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+      <StageTabs
+        stage="Synthesize"
+        tabs={[
+          {
+            href: `/projects/${projectId}/read`,
+            label: "Reading room",
+            active: false,
+          },
+          {
+            href: `/projects/${projectId}/concepts`,
+            label: "Concept matrix",
+            active: true,
+          },
+        ]}
+      />
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Concept matrix
       </h1>
+
       <p className="mb-6 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
         Webster and Watson&apos;s concept centric synthesis: while reading a
         paper, tick the concepts it discusses and paste passages as evidence.

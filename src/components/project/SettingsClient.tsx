@@ -3,13 +3,10 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ApiKeysCard from "@/components/project/ApiKeysCard";
-import { mergeKeywords, seedKeywords } from "@/lib/keywordSeed";
-import type { Project, SearchConfig } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 export default function SettingsClient({ project }: { project: Project }) {
   const [name, setName] = useState(project.name);
-  const [includeKw, setIncludeKw] = useState(project.include_keywords.join(", "));
-  const [excludeKw, setExcludeKw] = useState(project.exclude_keywords.join(", "));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -46,54 +43,6 @@ export default function SettingsClient({ project }: { project: Project }) {
     setReqMsg("Saved. Screening queues follow the new rule on next load.");
   }
 
-  function parseKeywords(s: string): string[] {
-    return s
-      .split(",")
-      .map((k) => k.trim())
-      .filter(Boolean);
-  }
-
-  // Fill the highlight fields from the Discovery page's search
-  // strategy: normal concept groups suggest green terms, NOT groups
-  // red ones. Nothing is saved until the user reviews and hits Save.
-  const [seeding, setSeeding] = useState(false);
-  async function suggestFromSearch() {
-    setSeeding(true);
-    setMessage(null);
-    setError(null);
-    const supabase = createClient();
-    // Fetch fresh: the search string may have been edited on the
-    // Discovery page since this page loaded.
-    const { data } = await supabase
-      .from("projects")
-      .select("search_config")
-      .eq("id", project.id)
-      .single();
-    const config = (data?.search_config ??
-      project.search_config) as Partial<SearchConfig> | null;
-    const seeds = seedKeywords(config);
-    setSeeding(false);
-    if (seeds.include.length === 0 && seeds.exclude.length === 0) {
-      setMessage(
-        "The search strategy on the Discovery page has no terms yet, so there is nothing to suggest."
-      );
-      return;
-    }
-    const nextInc = mergeKeywords(includeKw, seeds.include);
-    const nextExc = mergeKeywords(excludeKw, seeds.exclude);
-    const addedInc =
-      parseKeywords(nextInc).length - parseKeywords(includeKw).length;
-    const addedExc =
-      parseKeywords(nextExc).length - parseKeywords(excludeKw).length;
-    setIncludeKw(nextInc);
-    setExcludeKw(nextExc);
-    setMessage(
-      addedInc + addedExc === 0
-        ? "Every search term is already in the lists; nothing new to add."
-        : `Added ${addedInc} include and ${addedExc} exclude term(s) from the search strategy. Edit freely, then Save.`
-    );
-  }
-
   async function save() {
     setSaving(true);
     setMessage(null);
@@ -103,8 +52,6 @@ export default function SettingsClient({ project }: { project: Project }) {
       .from("projects")
       .update({
         name: name.trim() || project.name,
-        include_keywords: parseKeywords(includeKw),
-        exclude_keywords: parseKeywords(excludeKw),
       })
       .eq("id", project.id);
     setSaving(false);
@@ -130,43 +77,13 @@ export default function SettingsClient({ project }: { project: Project }) {
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
           The research objective and questions live on the project page. The
           search string and limits live on the Discovery page. The inclusion
-          and exclusion criteria and the exclusion reasons live in the
-          screening room, next to where decisions get made.
+          and exclusion criteria, the exclusion reasons, and the screening
+          highlight keywords live in the screening room, next to where
+          decisions get made.
         </p>
         <label className={labelCls}>
           Name
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Screening highlights
-          </span>
-          <button
-            onClick={suggestFromSearch}
-            disabled={seeding}
-            title="Prefill both lists from the Discovery page's search strategy: concept group terms turn green, NOT group terms turn red. Review and Save."
-            className="rounded-full border border-zinc-300 px-3 py-1 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            {seeding ? "Reading search..." : "Suggest from search string"}
-          </button>
-        </div>
-        <label className={labelCls}>
-          Highlight keywords, include (comma separated, shown green while screening)
-          <input
-            className={inputCls}
-            placeholder="e-government, digital government, benchmark"
-            value={includeKw}
-            onChange={(e) => setIncludeKw(e.target.value)}
-          />
-        </label>
-        <label className={labelCls}>
-          Highlight keywords, exclude (comma separated, shown red while screening)
-          <input
-            className={inputCls}
-            placeholder="e-commerce, medical"
-            value={excludeKw}
-            onChange={(e) => setExcludeKw(e.target.value)}
-          />
         </label>
         <div className="flex items-center gap-3">
           <button

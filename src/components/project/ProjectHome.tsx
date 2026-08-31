@@ -442,13 +442,7 @@ export default function ProjectHome({
         <Link href={`/projects/${project.id}/records`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Records</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Browse, search, and audit
-          </p>
-        </Link>
-        <Link href={`/projects/${project.id}/duplicates`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Duplicates</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Review near match pairs
+            The corpus: browse, search, audit, duplicates
           </p>
         </Link>
         <Link href={`/projects/${project.id}/snowball`} className={tile}>
@@ -458,29 +452,21 @@ export default function ProjectHome({
           </p>
         </Link>
         <Link href={`/projects/${project.id}/read`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Reading room</h2>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Synthesize</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Annotate included papers, concept by concept
-          </p>
-        </Link>
-        <Link href={`/projects/${project.id}/concepts`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Concepts</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Webster and Watson concept matrix
+            Reading room and concept matrix
           </p>
         </Link>
         <Link href={`/projects/${project.id}/prisma`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
-            PRISMA and exports
-          </h2>
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Report</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Flow diagram, RIS, CSV, backup
+            PRISMA diagram, written methods, exports
           </p>
         </Link>
         <Link href={`/projects/${project.id}/settings`} className={tile}>
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Settings</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Name and highlight keywords
+            Team, screening quotas, API keys
           </p>
         </Link>
       </div>

@@ -7,6 +7,7 @@ import { kbd } from "@/lib/ui";
 import { requiredFor, settledOutcome, outcomeOf } from "@/lib/outcomes";
 import PrescreenPanel from "@/components/project/PrescreenPanel";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
+import HighlightingCard from "@/components/project/HighlightingCard";
 import { cleanQuote } from "@/lib/concepts";
 import {
   fulltextPathFor,
@@ -268,6 +269,13 @@ export default function ScreenClient({
     );
   }
 
+  // Highlight keywords, editable in the sidebar and applied live.
+  const [kwInclude, setKwInclude] = useState<string[]>(
+    project.include_keywords
+  );
+  const [kwExclude, setKwExclude] = useState<string[]>(
+    project.exclude_keywords
+  );
   // Criteria panel
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [criteriaEditing, setCriteriaEditing] = useState(false);
@@ -1610,8 +1618,8 @@ export default function ScreenClient({
                 <h2 className="mb-2 text-2xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
                   <Highlighted
                     text={current.title}
-                    include={project.include_keywords}
-                    exclude={project.exclude_keywords}
+                    include={kwInclude}
+                    exclude={kwExclude}
                   />
                 </h2>
                 <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1726,8 +1734,8 @@ export default function ScreenClient({
                       <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
                         <Highlighted
                           text={current.abstract}
-                          include={project.include_keywords}
-                          exclude={project.exclude_keywords}
+                          include={kwInclude}
+                          exclude={kwExclude}
                         />
                       </p>
                       <button
@@ -1928,6 +1936,14 @@ export default function ScreenClient({
               </div>
             )}
           </div>
+
+          <HighlightingCard
+            project={project}
+            onSaved={(inc, exc) => {
+              setKwInclude(inc);
+              setKwExclude(exc);
+            }}
+          />
 
           <div className={sideCard}>
             <div className="mb-2 flex items-center justify-between">
