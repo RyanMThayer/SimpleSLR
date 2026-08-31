@@ -554,6 +554,7 @@ export default function ReadClient({
   const [papers, setPapers] = useState<RecordRow[] | null>(null);
   const [awaitingCount, setAwaitingCount] = useState(0);
   const [recIdx, setRecIdx] = useState(0);
+  const deepLinkDone = useRef(false);
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [tags, setTags] = useState<ConceptTag[]>([]);
   const [excerpts, setExcerpts] = useState<ConceptExcerpt[]>([]);
@@ -714,6 +715,22 @@ export default function ReadClient({
       });
 
       setPapers(recs);
+      // Deep link from the concept matrix's Code button: ?record=<id>
+      // opens straight at that paper, once, on the first load.
+      if (!deepLinkDone.current) {
+        deepLinkDone.current = true;
+        try {
+          const want = new URLSearchParams(window.location.search).get(
+            "record"
+          );
+          if (want) {
+            const at = recs.findIndex((r) => r.id === want);
+            if (at >= 0) setRecIdx(at);
+          }
+        } catch {
+          // No deep link; the first paper opens as usual.
+        }
+      }
       setConcepts((cRes.data ?? []) as Concept[]);
       setTags((tRes.data ?? []) as ConceptTag[]);
       setExcerpts((eRes.data ?? []) as ConceptExcerpt[]);

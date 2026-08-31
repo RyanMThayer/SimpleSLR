@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { card } from "@/lib/ui";
 import { awaitingTeammates, requiredFor, settledOutcome } from "@/lib/outcomes";
 import AwaitingNote from "@/components/project/AwaitingNote";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
-import { signedFulltextUrl } from "@/lib/fulltext";
 import {
   buildExcerptsCsv,
   buildMatrixCsv,
@@ -60,11 +60,6 @@ export default function ConceptsClient({
   const [rowFilter, setRowFilter] = useState<RowFilter>("reading");
   const [error, setError] = useState<string | null>(null);
 
-  // Coding view
-  const [codingId, setCodingId] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [showAbstract, setShowAbstract] = useState(false);
-
   // Matrix evidence panel
   const [cell, setCell] = useState<Cell | null>(null);
 
@@ -76,7 +71,7 @@ export default function ConceptsClient({
     description: string;
   } | null>(null);
 
-  // Quote entry (shared by coding view and evidence panel)
+  // Quote entry (evidence panel)
   const [quoteFor, setQuoteFor] = useState<string | null>(null);
   const [quoteText, setQuoteText] = useState("");
   const [quotePage, setQuotePage] = useState("");
@@ -229,29 +224,6 @@ export default function ConceptsClient({
     loadPapers();
     loadConcepts();
   }, [loadPapers, loadConcepts]);
-
-  // Signed PDF url for the coding view
-  const codingRecord = useMemo(
-    () => records?.find((r) => r.id === codingId) ?? null,
-    [records, codingId]
-  );
-  useEffect(() => {
-    let cancelled = false;
-    // Reset viewer state when the coded record changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPdfUrl(null);
-    setShowAbstract(false);
-    if (codingRecord?.fulltext_path) {
-      signedFulltextUrl(codingRecord.fulltext_path).then((res) => {
-        if (cancelled) return;
-        if (res.url) setPdfUrl(res.url);
-        else if (res.error) setError(res.error);
-      });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [codingRecord]);
 
   // ------------------------------------------------------------------
   // Derived maps
@@ -651,194 +623,6 @@ export default function ConceptsClient({
   // Coding view
   // ------------------------------------------------------------------
 
-  if (codingRecord && records) {
-    const list = shownRecords.length > 0 ? shownRecords : records;
-    const idx = list.findIndex((r) => r.id === codingRecord.id);
-    const prev = idx > 0 ? list[idx - 1] : null;
-    const next = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
-
-    return (
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <button onClick={() => setCodingId(null)} className={ghostBtn}>
-            &larr; Back to matrix
-          </button>
-          <span className="text-sm text-zinc-600 dark:text-zinc-400">
-            Paper {idx + 1} of {list.length}
-          </span>
-          {ftIncluded.has(codingRecord.id) && (
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
-              included
-            </span>
-          )}
-          <span className="flex-1" />
-          <button
-            onClick={() => prev && setCodingId(prev.id)}
-            disabled={!prev}
-            className={ghostBtn}
-          >
-            &larr; Previous
-          </button>
-          <button
-            onClick={() => next && setCodingId(next.id)}
-            disabled={!next}
-            className={ghostBtn}
-          >
-            Next &rarr;
-          </button>
-        </div>
-
-        {error && (
-          <p className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-            {error}
-          </p>
-        )}
-
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <div className="min-w-0 flex-1">
-            <div className={card}>
-              <h1 className="text-lg font-semibold leading-6 text-zinc-900 dark:text-zinc-50">
-                {codingRecord.title}
-              </h1>
-              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                {[codingRecord.authors, codingRecord.year, codingRecord.venue]
-                  .filter(Boolean)
-                  .join(" · ")}
-                {pdfUrl && (
-                  <>
-                    {" · "}
-                    <button
-                      onClick={() => window.open(pdfUrl, "_blank", "noopener")}
-                      className="underline underline-offset-2"
-                    >
-                      Open in tab
-                    </button>
-                    {codingRecord.abstract && (
-                      <>
-                        {" · "}
-                        <button
-                          onClick={() => setShowAbstract(!showAbstract)}
-                          className="underline underline-offset-2"
-                        >
-                          {showAbstract ? "Hide abstract" : "Show abstract"}
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-              </p>
-              {(!pdfUrl || showAbstract) &&
-                (codingRecord.abstract ? (
-                  <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-800 dark:text-zinc-200">
-                    {codingRecord.abstract}
-                  </p>
-                ) : (
-                  <p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">
-                    No abstract in the export for this record.
-                  </p>
-                ))}
-              {pdfUrl ? (
-                <iframe
-                  src={`${pdfUrl}#view=FitH&navpanes=0`}
-                  title="Full text PDF"
-                  className="mt-3 h-[75vh] w-full rounded-lg border border-zinc-200 dark:border-zinc-700"
-                />
-              ) : codingRecord.fulltext_path ? (
-                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading PDF...</p>
-              ) : (
-                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-                  No PDF stored for this paper; upload one in the full text
-                  screening room to read it here.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <aside className="w-full shrink-0 lg:w-96">
-            <div className={card}>
-              <h2 className="mb-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                Concepts in this paper
-              </h2>
-              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">
-                Tick what the paper discusses. To attach evidence, copy a
-                passage in the PDF and paste it as a quote.
-              </p>
-              <ul className="flex flex-col gap-2">
-                {concepts.map((c) => {
-                  const tag = tagByKey.get(`${codingRecord.id}:${c.id}`);
-                  return (
-                    <li
-                      key={c.id}
-                      className="rounded-lg border border-zinc-100 p-2 dark:border-zinc-800"
-                    >
-                      <label className="flex cursor-pointer items-start gap-2">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(tag)}
-                          onChange={() => toggleTag(codingRecord.id, c.id)}
-                          className="mt-0.5"
-                        />
-                        <span
-                          className="text-sm text-zinc-800 dark:text-zinc-200"
-                          title={c.description ?? undefined}
-                        >
-                          {c.label}
-                        </span>
-                      </label>
-                      {tag && (
-                        <div className="ml-6 mt-1 flex flex-col gap-1">
-                          <input
-                            key={tag.id}
-                            defaultValue={tag.unit ?? ""}
-                            onBlur={(e) =>
-                              updateTagField(tag, "unit", e.target.value)
-                            }
-                            placeholder="Unit of analysis (optional)"
-                            className={`${inputCls} w-full`}
-                          />
-                          {excerptList(codingRecord.id, c.id)}
-                          {quoteBox(codingRecord.id, c.id)}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="mt-3 flex items-center gap-2">
-                <input
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter") {
-                      const row = await addConcept(newLabel);
-                      if (row) setNewLabel("");
-                    }
-                  }}
-                  placeholder="New concept..."
-                  className={`${inputCls} min-w-0 flex-1`}
-                />
-                <button
-                  onClick={async () => {
-                    const row = await addConcept(newLabel);
-                    if (row) setNewLabel("");
-                  }}
-                  disabled={!newLabel.trim()}
-                  className={ghostBtn}
-                >
-                  Add
-                </button>
-              </div>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-                New concepts mid reading are normal; that is how the set
-                emerges. Rename and merge from the matrix page.
-              </p>
-            </div>
-          </aside>
-        </div>
-      </main>
-    );
-  }
-
   // ------------------------------------------------------------------
   // Matrix view
   // ------------------------------------------------------------------
@@ -1134,12 +918,22 @@ export default function ConceptsClient({
                       );
                     })}
                     <td className="border-t border-zinc-100 px-2 py-1.5 text-right dark:border-zinc-800">
-                      <button
-                        onClick={() => setCodingId(r.id)}
-                        className={ghostBtn}
-                      >
-                        Code
-                      </button>
+                      {ftIncluded.has(r.id) ? (
+                        <Link
+                          href={`/projects/${projectId}/read?record=${r.id}`}
+                          className={ghostBtn}
+                          title="Open this paper in the reading room, the one place papers are read and coded"
+                        >
+                          Code
+                        </Link>
+                      ) : (
+                        <span
+                          className="text-xs text-zinc-400 dark:text-zinc-500"
+                          title="Joins the reading room once full text screening settles on include; until then, click a matrix cell to tick concepts or paste a quote by hand"
+                        >
+                          in screening
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
