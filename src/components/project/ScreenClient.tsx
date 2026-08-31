@@ -276,6 +276,20 @@ export default function ScreenClient({
   const [kwExclude, setKwExclude] = useState<string[]>(
     project.exclude_keywords
   );
+  // Owners manage the criteria; members screen against them.
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("project_members")
+        .select("role")
+        .eq("project_id", project.id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      setIsOwner(data?.role === "owner");
+    })();
+  }, [project.id, userId]);
   // Criteria panel
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [criteriaEditing, setCriteriaEditing] = useState(false);
@@ -1925,12 +1939,12 @@ export default function ScreenClient({
                         screening keeps the whole team calibrated.
                       </p>
                     )}
-                    <button
+                    {isOwner && (<button
                       onClick={() => setCriteriaEditing(true)}
                       className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
                     >
                       Edit
-                    </button>
+                    </button>)}
                   </>
                 )}
               </div>
@@ -1950,12 +1964,12 @@ export default function ScreenClient({
               <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                 Exclude with reason
               </h3>
-              <button
+              {isOwner && (<button
                 onClick={() => setManageOpen(!manageOpen)}
                 className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-300"
               >
                 {manageOpen ? "done" : "manage"}
-              </button>
+              </button>)}
             </div>
 
             {reasons.length === 0 && (

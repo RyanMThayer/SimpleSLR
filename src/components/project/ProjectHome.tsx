@@ -350,12 +350,21 @@ export default function ProjectHome({
             Research objective and questions
           </h2>
           {!editingRq ? (
-            <button
-              onClick={() => setEditingRq(true)}
-              className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
-            >
-              Edit
-            </button>
+            members.find((m) => m.user_id === userId)?.role === "owner" ? (
+              <button
+                onClick={() => setEditingRq(true)}
+                className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+              >
+                Edit
+              </button>
+            ) : (
+              <span
+                className="text-xs text-zinc-400 dark:text-zinc-500"
+                title="Project owners edit the research objective and questions"
+              >
+                owner only
+              </span>
+            )
           ) : (
             <div className="flex gap-3">
               <button

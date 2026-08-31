@@ -1,12 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import ApiKeysCard from "@/components/project/ApiKeysCard";
+import TeamCard from "@/components/project/TeamCard";
 import type { Project } from "@/lib/types";
 
-export default function SettingsClient({ project }: { project: Project }) {
+export default function SettingsClient({
+  project,
+  userId,
+}: {
+  project: Project;
+  userId: string;
+}) {
   const [name, setName] = useState(project.name);
+  // Owners manage settings; members see them read only.
+  const [isOwner, setIsOwner] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("project_members")
+        .select("role")
+        .eq("project_id", project.id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsOwner(data?.role === "owner");
+    })();
+  }, [project.id, userId]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -81,14 +103,19 @@ export default function SettingsClient({ project }: { project: Project }) {
           highlight keywords live in the screening room, next to where
           decisions get made.
         </p>
+        {!isOwner && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Owner only: project settings can be changed by project owners.
+          </p>
+        )}
         <label className={labelCls}>
           Name
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} disabled={!isOwner} />
         </label>
         <div className="flex items-center gap-3">
           <button
             onClick={save}
-            disabled={saving}
+            disabled={saving || !isOwner}
             className="rounded-full bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
           >
             {saving ? "Saving..." : "Save"}
@@ -98,6 +125,8 @@ export default function SettingsClient({ project }: { project: Project }) {
           )}
         </div>
       </div>
+
+      <TeamCard projectId={project.id} userId={userId} />
 
       <div className="mb-6 flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
         <div>
@@ -125,7 +154,7 @@ export default function SettingsClient({ project }: { project: Project }) {
             onClick={() =>
               independent ? saveOpinions(1, 1) : saveOpinions(2, 2)
             }
-            disabled={savingReq}
+            disabled={savingReq || !isOwner}
             role="switch"
             aria-checked={independent}
             className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${
@@ -153,7 +182,7 @@ export default function SettingsClient({ project }: { project: Project }) {
               <select
                 value={reqTa}
                 onChange={(e) => saveOpinions(Number(e.target.value), reqFt)}
-                disabled={savingReq}
+                disabled={savingReq || !isOwner}
                 className={inputCls}
               >
                 {[1, 2, 3].map((n) => (
@@ -168,7 +197,7 @@ export default function SettingsClient({ project }: { project: Project }) {
               <select
                 value={reqFt}
                 onChange={(e) => saveOpinions(reqTa, Number(e.target.value))}
-                disabled={savingReq}
+                disabled={savingReq || !isOwner}
                 className={inputCls}
               >
                 {[1, 2, 3].map((n) => (

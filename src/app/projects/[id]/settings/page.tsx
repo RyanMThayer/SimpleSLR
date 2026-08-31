@@ -13,7 +13,7 @@ export default async function SettingsPage({
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-zinc-950">
       <AppHeader email={user.email} projectName={project.name} projectId={project.id} />
-      <SettingsClient project={project} />
+      <SettingsClient project={project} userId={user.id} />
     </div>
   );
 }

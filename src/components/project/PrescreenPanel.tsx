@@ -39,6 +39,7 @@ export default function PrescreenPanel({
   onDone: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
   const [hasAnthropic, setHasAnthropic] = useState(false);
   const [hasOpenai, setHasOpenai] = useState(false);
   const [running, setRunning] = useState<"live" | "validate" | null>(null);
@@ -170,6 +171,18 @@ export default function PrescreenPanel({
         .eq("project_id", project.id)
         .eq("status", "prescreen_excluded");
       setPrescreenedCount(count ?? 0);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data: me } = await supabase
+          .from("project_members")
+          .select("role")
+          .eq("project_id", project.id)
+          .eq("user_id", user.id)
+          .maybeSingle();
+        setIsOwner(me?.role === "owner");
+      }
       setUnscreenedCount((await candidateIds("live")).length);
     })();
     // candidateIds reads only stable project identity.
@@ -444,7 +457,15 @@ export default function PrescreenPanel({
               intended.
             </p>
 
-            {needsSetup && (
+            {needsSetup && !isOwner && (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+                The prescreen needs the research question, the inclusion
+                criteria, and at least one exclusion reason recorded. A
+                project owner records them (criteria management is owner
+                only).
+              </p>
+            )}
+            {needsSetup && isOwner && (
               <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
                 <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
                   Before the AI can screen anything, it needs the exact

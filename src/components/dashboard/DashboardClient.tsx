@@ -30,6 +30,14 @@ export default function DashboardClient({ userId }: { userId: string }) {
 
   const load = useCallback(async () => {
     const supabase = createClient();
+    // Email invites are claimed at sign-in: any project that invited
+    // this address joins here, before the list loads. Best effort; the
+    // function is absent before migration 0022.
+    try {
+      await supabase.rpc("claim_project_invites");
+    } catch {
+      // Nothing to claim.
+    }
     const { data, error } = await supabase
       .from("projects")
       .select("*")
