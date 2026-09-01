@@ -179,12 +179,11 @@ export function limitsSummary(config: SearchConfig): string {
 export const STANDARD_DATABASES: {
   name: string;
   kind: DatabaseKind;
-  defaultEnabled?: boolean;
   note?: string;
 }[] = [
-  { name: "Scopus", kind: "scopus", defaultEnabled: true },
-  { name: "Web of Science Core Collection", kind: "wos", defaultEnabled: true },
-  { name: "IEEE Xplore", kind: "ieee", defaultEnabled: true },
+  { name: "Scopus", kind: "scopus" },
+  { name: "Web of Science Core Collection", kind: "wos" },
+  { name: "IEEE Xplore", kind: "ieee" },
   { name: "ACM Digital Library", kind: "custom" },
   { name: "PubMed", kind: "pubmed" },
   { name: "ScienceDirect", kind: "custom" },

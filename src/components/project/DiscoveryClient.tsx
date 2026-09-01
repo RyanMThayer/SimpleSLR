@@ -80,10 +80,11 @@ export default function DiscoveryClient({
       return;
     }
     let rows = (dbRows ?? []) as ProjectDatabase[];
-    // Seed (or top up) the standard database list. Existing rows are
-    // matched by kind for the known syntaxes and by name otherwise, so
-    // nothing the team already configured is duplicated or touched.
-    const firstVisit = rows.length === 0;
+    // Seed (or top up) the standard database list, all UNCHECKED: the
+    // team ticks what they actually search, nothing is preselected.
+    // Existing rows are matched by kind for the known syntaxes and by
+    // name otherwise, so nothing already configured is duplicated or
+    // touched.
     const missing = STANDARD_DATABASES.filter((std) => {
       if (std.kind !== "custom") {
         return !rows.some((r) => r.kind === std.kind);
@@ -98,7 +99,7 @@ export default function DiscoveryClient({
           project_id: project.id,
           name: d.name,
           kind: d.kind,
-          enabled: firstVisit ? Boolean(d.defaultEnabled) : false,
+          enabled: false,
           position: STANDARD_DATABASES.findIndex((s) => s.name === d.name) + i,
         }))
       );
@@ -509,7 +510,7 @@ export default function DiscoveryClient({
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
           Concept groups are combined with AND; terms inside a group with OR.
           Phrases get quotes automatically; type * yourself for truncation
-          (e.g. refugee*).
+          (an asterisk matches any word ending).
         </p>
 
         {pasteOpen && (
@@ -669,7 +670,7 @@ export default function DiscoveryClient({
                     className={`${inputCls} h-8 w-56 py-0`}
                     placeholder={
                       group.terms.length === 0
-                        ? "First term, e.g. agent-based model*"
+                        ? "First term"
                         : "OR another term..."
                     }
                     value={termInputs[gi] ?? ""}

@@ -271,11 +271,22 @@ export function buildSnowballGraph(input: {
     if (seed.status === "duplicate" || rec.status === "duplicate") continue;
     // Resolution can fold a link back onto its own seed.
     if (seed.id === rec.id) continue;
+    // The seed was snowballed FROM, so it belongs on the map even if
+    // every one of its citations lands on filtered-out records.
+    const seedNode = addNode(seed, true);
+    // PROVENANCE RULE: an arrow means "this record surfaced through
+    // snowballing from this seed", nothing else. A citation landing on
+    // a record the corpus already held (a seed citing another seed is
+    // the common case) is real citation structure, but it is not how
+    // that record surfaced in the search, so it draws nothing.
+    const recSnowballed = Boolean(
+      rec.batch_id && batches.get(rec.batch_id)?.origin?.startsWith("snowball")
+    );
+    if (!recSnowballed) continue;
     const dir = l.direction === "forward" ? "forward" : "backward";
     const key = `${seed.id}:${rec.id}:${dir}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const seedNode = addNode(seed, true);
     const recNode = addNode(rec, false);
     seedNode.degree++;
     recNode.degree++;
@@ -290,6 +301,41 @@ export function buildSnowballGraph(input: {
   }
 
   return { nodes: [...nodes.values()], edges };
+}
+
+/**
+ * Round structure of the search, for the flow view. Generation 1
+ * sources are seeds the corpus held before snowballing (the database
+ * arm); a snowball-found paper that was later snowballed from sits one
+ * round after the seed that FIRST found it. First-finder attribution
+ * follows link creation order, matching the flow view's counting, and
+ * anything with no traceable finder falls back to round 1 rather than
+ * vanishing. Chains are capped at 6 rounds.
+ */
+export function flowGenerations(
+  nodes: SnowballNode[],
+  edges: SnowballEdge[]
+): { finderOf: Map<string, string>; genOf: Map<string, number> } {
+  const finderOf = new Map<string, string>();
+  edges.forEach((e) => {
+    if (!finderOf.has(e.recordId)) finderOf.set(e.recordId, e.seedId);
+  });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const genOf = new Map<string, number>();
+  const gen = (id: string, hops: number): number => {
+    const cached = genOf.get(id);
+    if (cached) return cached;
+    const n = byId.get(id);
+    const finder = finderOf.get(id);
+    const g =
+      !n || !n.snowballed || !finder || hops >= 6
+        ? 1
+        : gen(finder, hops + 1) + 1;
+    genOf.set(id, g);
+    return g;
+  };
+  nodes.forEach((n) => gen(n.id, 0));
+  return { finderOf, genOf };
 }
 
 /** Node radius: seeds anchor large; candidates grow with corroboration. */

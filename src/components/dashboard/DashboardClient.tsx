@@ -187,7 +187,7 @@ export default function DashboardClient({ userId }: { userId: string }) {
         <form onSubmit={createProject} className="mb-6 flex gap-2">
           <input
             className={inputCls}
-            placeholder="Review name, e.g. E-government benchmarking SLR"
+            placeholder="Review name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required

@@ -133,7 +133,6 @@ export default function HighlightingCard({
             Include terms (comma separated)
             <input
               className={inputCls}
-              placeholder="e-government, digital government"
               value={includeKw}
               onChange={(e) => setIncludeKw(e.target.value)}
             />
@@ -142,7 +141,6 @@ export default function HighlightingCard({
             Exclude terms (comma separated)
             <input
               className={inputCls}
-              placeholder="e-commerce, medical"
               value={excludeKw}
               onChange={(e) => setExcludeKw(e.target.value)}
             />
