@@ -1,11 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { requiredFor, settledOutcome } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
 import type { Project, ProjectMember } from "@/lib/types";
+
+/**
+ * Research questions are stored one per line, usually typed as
+ * "RQ1: ..."; the chip renders separately from the text, so a typed
+ * label is lifted out and lines without one get numbered in order.
+ */
+function splitRq(line: string, i: number): { label: string; text: string } {
+  const m = line.match(/^\s*(RQ\s*\d+)\s*[:.\-]\s*(.+)$/i);
+  if (m) {
+    return { label: m[1].replace(/\s+/g, "").toUpperCase(), text: m[2] };
+  }
+  return { label: `RQ${i + 1}`, text: line.trim() };
+}
 
 type MemberProgress = ProjectMember & {
   assigned: number;
@@ -427,15 +440,20 @@ export default function ProjectHome({
               </p>
             )}
             {questions ? (
-              <div className="flex flex-col gap-1">
-                {questions.split("\n").filter((l) => l.trim()).map((l, i) => (
-                  <p
-                    key={i}
-                    className="font-serif text-[14.5px] text-zinc-700 dark:text-zinc-300"
-                  >
-                    {l}
-                  </p>
-                ))}
+              <div className="grid grid-cols-[44px_1fr] gap-y-1.5">
+                {questions.split("\n").filter((l) => l.trim()).map((l, i) => {
+                  const { label, text } = splitRq(l, i);
+                  return (
+                    <Fragment key={i}>
+                      <b className="pt-0.5 font-mono text-[11.5px] font-medium text-teal-700 dark:text-teal-400">
+                        {label}
+                      </b>
+                      <span className="font-serif text-[14.5px] leading-normal text-zinc-700 dark:text-zinc-300">
+                        {text}
+                      </span>
+                    </Fragment>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
