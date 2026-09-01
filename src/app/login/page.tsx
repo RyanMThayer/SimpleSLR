@@ -152,7 +152,7 @@ export default function LoginPage() {
           : "outline",
         size: "large",
         text: "continue_with",
-        shape: "pill",
+        shape: "rectangular",
         width: Math.min(400, el.offsetWidth || 336),
       });
       setGsiRendered(true);
@@ -276,7 +276,7 @@ export default function LoginPage() {
       <main className="flex w-full max-w-sm flex-col items-center gap-5">
         <Link
           href="/"
-          className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+          className="font-serif text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
         >
           SimpleSLR
         </Link>
@@ -289,7 +289,7 @@ export default function LoginPage() {
         ) : (
           <>
             <div className="flex w-full flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-              <h1 className="text-center text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              <h1 className="text-center font-serif text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
                 {mode === "signin"
                   ? "Sign in"
                   : mode === "signup"
@@ -314,7 +314,7 @@ export default function LoginPage() {
                       type="button"
                       onClick={signInWithGoogle}
                       disabled={loading}
-                      className="flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
                     >
                       <GoogleG />
                       Continue with Google
@@ -394,7 +394,7 @@ export default function LoginPage() {
                     (mode === "signup" && !passwordOk(password, email)) ||
                     (mode === "forgot" && cooldown > 0)
                   }
-                  className="mt-1 flex h-11 items-center justify-center rounded-full bg-teal-700 px-6 text-base font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                  className="mt-1 flex h-11 items-center justify-center rounded-md bg-teal-700 px-6 text-base font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
                 >
                   {loading
                     ? "Please wait..."
@@ -454,7 +454,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={resendConfirmation}
                   disabled={resendBusy}
-                  className="rounded-full border border-teal-400 px-3 py-1 text-sm transition-colors hover:bg-teal-100 disabled:opacity-50 dark:border-teal-700 dark:hover:bg-teal-900"
+                  className="rounded-md border border-teal-400 px-3 py-1 text-sm transition-colors hover:bg-teal-100 disabled:opacity-50 dark:border-teal-700 dark:hover:bg-teal-900"
                 >
                   {resendBusy ? "Sending..." : "Resend confirmation email"}
                 </button>

@@ -24,7 +24,7 @@ export default function LegalPage({
         >
           &larr; SimpleSLR
         </Link>
-        <h1 className="mt-5 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+        <h1 className="mt-5 font-serif text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           {title}
         </h1>
         <p className="mt-1 mb-8 text-sm text-zinc-500 dark:text-zinc-400">
@@ -46,7 +46,7 @@ export function LegalSection({
 }) {
   return (
     <section>
-      <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+      <h2 className="mb-2 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
         {heading}
       </h2>
       <div className="flex flex-col gap-3 text-sm leading-6 text-zinc-700 dark:text-zinc-300">

@@ -15,7 +15,7 @@ export default function AppHeader({
       <div className="flex items-center gap-3 overflow-hidden">
         <Link
           href="/dashboard"
-          className="shrink-0 text-lg font-semibold text-zinc-900 hover:text-zinc-600 dark:text-zinc-50 dark:hover:text-zinc-300"
+          className="shrink-0 font-serif text-lg font-semibold text-zinc-900 hover:text-zinc-600 dark:text-zinc-50 dark:hover:text-zinc-300"
         >
           SimpleSLR
         </Link>

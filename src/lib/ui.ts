@@ -25,15 +25,22 @@ export const card =
 
 /** Filled teal call to action. */
 export const btnPrimary =
-  "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
+  "rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
 
 /** Neutral outlined button, the workhorse. */
 export const btnSecondary =
-  "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
 /** Compact variant of btnSecondary for toolbars and chips. */
 export const btnSecondarySm =
-  "rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+
+/** Serif page and section headings ("Journal skin"). */
+export const headingSerif = "font-serif font-semibold tracking-tight";
+
+/** Ruled small caps panel header bar ("Notebook density"). */
+export const panelHead =
+  "flex items-center justify-between border-b border-zinc-200 bg-zinc-100/70 px-5 py-2 dark:border-zinc-800 dark:bg-zinc-800/40";
 
 /** Selected state for filter chips and tabs (pairs with btnSecondarySm). */
 export const chipActive =

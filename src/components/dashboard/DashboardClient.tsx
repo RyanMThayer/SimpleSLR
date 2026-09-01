@@ -163,14 +163,14 @@ export default function DashboardClient({ userId }: { userId: string }) {
   const inputCls =
     "h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
   const primaryBtn =
-    "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
+    "rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
   const ghostBtn =
-    "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+    "rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="font-serif text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Your reviews
         </h1>
         <div className="flex gap-2">
@@ -236,7 +236,7 @@ export default function DashboardClient({ userId }: { userId: string }) {
               href={`/projects/${p.id}`}
               className="rounded-xl border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
             >
-              <h2 className="mb-1 font-semibold text-zinc-900 dark:text-zinc-50">
+              <h2 className="mb-1 font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                 {p.name}
               </h2>
               <p className="text-sm text-zinc-600 dark:text-zinc-400">

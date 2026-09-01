@@ -319,15 +319,21 @@ export default function ProjectHome({
   }
 
   const tile =
-    "rounded-xl border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600";
+    "relative flex flex-col rounded-xl border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600";
+  const tileTitle = "font-serif font-semibold text-zinc-900 dark:text-zinc-50";
+  const tileDesc = "mt-0.5 flex-1 text-sm text-zinc-600 dark:text-zinc-400";
+  const tileStat =
+    "mt-3 border-t border-zinc-100 pt-2 font-mono text-[11px] tabular-nums text-zinc-500 dark:border-zinc-800 dark:text-zinc-400";
+  const tileNum =
+    "absolute top-3.5 right-4 font-mono text-[11px] text-zinc-400 dark:text-zinc-500";
   const rqInput =
     "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
+    <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="font-serif text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {project.name}
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -337,16 +343,16 @@ export default function ProjectHome({
         </div>
         <button
           onClick={copyCode}
-          className="rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 font-mono text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           title="Teammates join with this code on their dashboard"
         >
-          {copied ? "Copied!" : `Invite code: ${project.invite_code}`}
+          {copied ? "Copied!" : `invite ${project.invite_code}`}
         </button>
       </div>
 
-      <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <section className="mb-7 overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-100/70 px-5 py-2 dark:border-zinc-800 dark:bg-zinc-800/40">
+          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Research objective and questions
           </h2>
           {!editingRq ? (
@@ -388,7 +394,7 @@ export default function ProjectHome({
           )}
         </div>
         {editingRq ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 px-5 py-4">
             <label className="flex flex-col gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
               Research objective
               <textarea
@@ -409,9 +415,11 @@ export default function ProjectHome({
             </label>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 px-5 py-4">
             {objective ? (
-              <p className="text-zinc-800 dark:text-zinc-200">{objective}</p>
+              <p className="font-serif text-[15.5px] leading-relaxed text-zinc-800 dark:text-zinc-200">
+                {objective}
+              </p>
             ) : (
               <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
                 No research objective yet. It anchors the search string and the
@@ -421,7 +429,10 @@ export default function ProjectHome({
             {questions ? (
               <div className="flex flex-col gap-1">
                 {questions.split("\n").filter((l) => l.trim()).map((l, i) => (
-                  <p key={i} className="text-sm text-zinc-700 dark:text-zinc-300">
+                  <p
+                    key={i}
+                    className="font-serif text-[14.5px] text-zinc-700 dark:text-zinc-300"
+                  >
                     {l}
                   </p>
                 ))}
@@ -435,61 +446,62 @@ export default function ProjectHome({
         )}
       </section>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+        The review
+      </p>
+      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link href={`/projects/${project.id}/discovery`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Discovery</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Search string, databases, import
-          </p>
+          <span className={tileNum}>1</span>
+          <h2 className={tileTitle}>Discovery</h2>
+          <p className={tileDesc}>Search string, databases, import.</p>
+          <div className={tileStat}>{activeCount} records</div>
         </Link>
         <Link href={`/projects/${project.id}/screen`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Screen</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Title/abstract and full text stages
-          </p>
-        </Link>
-        <Link href={`/projects/${project.id}/records`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Records</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            The corpus: browse, search, audit, duplicates
-          </p>
-        </Link>
-        <Link href={`/projects/${project.id}/snowball`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Snowball</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Backward and forward citation search
-          </p>
+          <span className={tileNum}>2</span>
+          <h2 className={tileTitle}>Screen</h2>
+          <p className={tileDesc}>Title/abstract and full text stages.</p>
         </Link>
         <Link href={`/projects/${project.id}/read`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Synthesize</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Reading room and concept matrix
-          </p>
+          <span className={tileNum}>3</span>
+          <h2 className={tileTitle}>Synthesize</h2>
+          <p className={tileDesc}>Reading room and concept matrix.</p>
         </Link>
         <Link href={`/projects/${project.id}/prisma`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Report</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            PRISMA diagram, written methods, exports
-          </p>
+          <span className={tileNum}>4</span>
+          <h2 className={tileTitle}>Report</h2>
+          <p className={tileDesc}>PRISMA diagram, written methods, exports.</p>
+        </Link>
+      </div>
+      <div className="mb-8 grid gap-3 sm:grid-cols-3">
+        <Link href={`/projects/${project.id}/snowball`} className={tile}>
+          <h2 className={tileTitle}>Snowball</h2>
+          <p className={tileDesc}>Backward and forward citation search.</p>
+        </Link>
+        <Link href={`/projects/${project.id}/records`} className={tile}>
+          <h2 className={tileTitle}>Records</h2>
+          <p className={tileDesc}>The corpus: browse, search, audit, duplicates.</p>
+          {dupCount > 0 && (
+            <div className={tileStat}>
+              {activeCount} live · {dupCount} duplicates
+            </div>
+          )}
         </Link>
         <Link href={`/projects/${project.id}/settings`} className={tile}>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Settings</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Team, screening quotas, API keys
-          </p>
+          <h2 className={tileTitle}>Project Settings</h2>
+          <p className={tileDesc}>Team, screening quotas, API keys.</p>
         </Link>
       </div>
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Title and abstract progress
           </h2>
           {requiredFor(project, "title_abstract") <= 1 ? (
             <button
               onClick={distribute}
               disabled={distributing || unassigned === 0}
-              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               title="Split all unassigned records evenly among team members"
             >
               {distributing ? "Distributing..." : "Distribute unassigned"}
@@ -549,14 +561,14 @@ export default function ProjectHome({
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Full text progress
           </h2>
           {requiredFor(project, "full_text") <= 1 ? (
             <button
               onClick={distributeFt}
               disabled={distributingFt || ftUnassignedIds.length === 0}
-              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               title="Split the unassigned full text records evenly among team members"
             >
               {distributingFt ? "Distributing..." : "Distribute full text"}

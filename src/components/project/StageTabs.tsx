@@ -23,7 +23,7 @@ export default function StageTabs({
         t.active ? (
           <span
             key={t.href}
-            className="rounded-full bg-teal-700 px-3 py-1 text-xs font-medium text-zinc-50 dark:bg-teal-400 dark:text-teal-950"
+            className="rounded-md bg-teal-700 px-3 py-1 text-xs font-medium text-zinc-50 dark:bg-teal-400 dark:text-teal-950"
           >
             {t.label}
           </span>
@@ -31,7 +31,7 @@ export default function StageTabs({
           <Link
             key={t.href}
             href={t.href}
-            className="rounded-full border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             {t.label}
           </Link>
