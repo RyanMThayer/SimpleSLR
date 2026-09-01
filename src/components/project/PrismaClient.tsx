@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { btnSecondary as exportBtn } from "@/lib/ui";
-import { buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
+import { buildBibtex, buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
 import {
   decisionsByRecord,
   requiredFor,
@@ -889,6 +889,17 @@ export default function PrismaClient({ project }: { project: Project }) {
     );
   }
 
+  function exportBibtex(which: "ta" | "ft") {
+    if (!data || !counts) return;
+    const ids = which === "ta" ? counts.taRecordIds : counts.ftRecordIds;
+    const recs = data.records.filter((r) => ids.has(r.id));
+    downloadFile(
+      `${base}-included-${which === "ta" ? "title-abstract" : "full-text"}.bib`,
+      buildBibtex(recs),
+      "application/x-bibtex"
+    );
+  }
+
   function exportRecordsCsv() {
     if (!data || !counts) return;
     const taMap = decisionsByRecord(data.decisions, "title_abstract");
@@ -1388,9 +1399,10 @@ export default function PrismaClient({ project }: { project: Project }) {
               Exports
             </h2>
             <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-              The RIS files import directly into Zotero or Mendeley for full
-              text reading and citing. The backup JSON contains the complete
-              project; download one after every serious screening session.
+              The RIS and BibTeX files import directly into Zotero, Mendeley,
+              or a LaTeX bibliography for full text reading and citing. The
+              backup JSON contains the complete project; download one after
+              every serious screening session.
               The concept matrix and excerpt CSVs live beside the matrix on
               the Synthesize page.
             </p>
@@ -1411,6 +1423,20 @@ export default function PrismaClient({ project }: { project: Project }) {
                 className={exportBtn}
               >
                 Included after full text (RIS, {counts.ftIncluded})
+              </button>
+              <button
+                onClick={() => exportBibtex("ta")}
+                disabled={counts.taIncluded === 0}
+                className={exportBtn}
+              >
+                Included after title/abstract (BibTeX, {counts.taIncluded})
+              </button>
+              <button
+                onClick={() => exportBibtex("ft")}
+                disabled={counts.ftIncluded === 0}
+                className={exportBtn}
+              >
+                Included after full text (BibTeX, {counts.ftIncluded})
               </button>
               <button onClick={exportRecordsCsv} className={exportBtn}>
                 All records (CSV)

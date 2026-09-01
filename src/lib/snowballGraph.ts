@@ -328,9 +328,14 @@ export function flowGenerations(
     const n = byId.get(id);
     const finder = finderOf.get(id);
     const g =
-      !n || !n.snowballed || !finder || hops >= 6
+      !n || !n.snowballed || !finder
         ? 1
-        : gen(finder, hops + 1) + 1;
+        : hops >= 6
+          ? // Cycle guard: two papers that each snowballed the other
+            // would recurse forever; a walk this deep is already at
+            // the cap, so land there rather than claiming round 1.
+            6
+          : Math.min(gen(finder, hops + 1) + 1, 6);
     genOf.set(id, g);
     return g;
   };
