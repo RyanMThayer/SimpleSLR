@@ -775,6 +775,17 @@ export default function ScreenClient({
     });
   }
 
+  // With the strip on and no undecided records left, the first strip
+  // item opens automatically: the strip never sits above a blank page.
+  useEffect(() => {
+    if (!strip || reviewing) return;
+    if (queue === null || queue.length > 0) return;
+    if (inspectId) return;
+    const first = aiRows[0] ?? doneRows[0];
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (first) setInspectId(first.id);
+  }, [strip, reviewing, queue, inspectId, aiRows, doneRows]);
+
   const inspected = inspectId
     ? (queue?.find((r) => r.id === inspectId) ??
       doneRows.find((r) => r.id === inspectId) ??
@@ -1862,6 +1873,43 @@ export default function ScreenClient({
         </p>
       )}
 
+      {strip && queue && reviewing && (
+        <div
+          className="mb-4 flex flex-wrap content-start gap-[3px]"
+          aria-label="Every screened record: violet was removed by the AI prescreen, green and red are your decisions, gray was decided by teammates only"
+        >
+          {queue.map((r, i) => {
+            const mineD = myDecisions.get(r.id);
+            const color =
+              r.status === "prescreen_excluded"
+                ? "bg-violet-500"
+                : mineD
+                  ? mineD.decision === "include"
+                    ? "bg-emerald-600"
+                    : "bg-red-600"
+                  : "bg-zinc-300 dark:bg-zinc-600";
+            return (
+              <button
+                key={r.id}
+                title={`${r.title} — ${
+                  r.status === "prescreen_excluded"
+                    ? "removed by the AI prescreen"
+                    : mineD
+                      ? `your decision: ${mineD.decision}`
+                      : "decided by teammates"
+                }`}
+                onClick={() => setIdx(i)}
+                className={`h-2.5 w-2.5 rounded-[2px] ${color} transition-transform hover:scale-125 ${
+                  i === Math.min(idx, queue.length - 1)
+                    ? "ring-2 ring-teal-600 ring-offset-1 dark:ring-teal-400"
+                    : ""
+                }`}
+              />
+            );
+          })}
+        </div>
+      )}
+
       {strip && !reviewing && queue && (
         <div
           className="mb-4 flex flex-wrap content-start gap-[3px]"
@@ -1914,6 +1962,22 @@ export default function ScreenClient({
           ))}
         </div>
       )}
+
+      {strip && !reviewing && queue && queue.length === 0 && !helping &&
+        othersRemaining > 0 && (
+          <p className="-mt-2 mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+            Teammates still have {othersRemaining} undecided record(s).{" "}
+            <button
+              onClick={() => {
+                setHelping(true);
+                setQueue(null);
+              }}
+              className="underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
+              Screen them
+            </button>
+          </p>
+        )}
 
       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
         {/* ---------------- Record ---------------- */}
