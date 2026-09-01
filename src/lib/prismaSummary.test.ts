@@ -186,6 +186,33 @@ describe("buildPrismaFactSheet", () => {
     expect(row.value).toContain("unanimous votes");
   });
 
+  it("shows inter-rater reliability rows only when supplied", () => {
+    const without = buildPrismaFactSheet(input());
+    expect(
+      without
+        .find((s) => s.title === "Selection process")!
+        .rows.some((r) => r.label.startsWith("Inter-rater reliability"))
+    ).toBe(false);
+
+    const withKappa = buildPrismaFactSheet(
+      input({
+        reliability: {
+          ta: { statistic: "cohen", value: 0.72, records: 180, raters: 2 },
+          ft: null,
+        },
+      })
+    );
+    const rows = withKappa.find((s) => s.title === "Selection process")!.rows;
+    const ta = rows.find(
+      (r) => r.label === "Inter-rater reliability (title and abstract)"
+    )!;
+    expect(ta.value).toContain("Cohen's kappa = 0.72");
+    expect(ta.value).toContain("substantial agreement");
+    expect(
+      rows.some((r) => r.label === "Inter-rater reliability (full text)")
+    ).toBe(false);
+  });
+
   it("notes blinding only under dual screening", () => {
     const single = buildPrismaFactSheet(input());
     expect(

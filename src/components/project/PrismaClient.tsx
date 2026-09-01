@@ -15,6 +15,7 @@ import {
   factSheetText,
   formatLongDate,
 } from "@/lib/prismaSummary";
+import { stageKappa } from "@/lib/kappa";
 import {
   extractionPrompt,
   factsUserPrompt,
@@ -1163,6 +1164,15 @@ export default function PrismaClient({ project }: { project: Project }) {
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
   }
 
+  const reliability = data
+    ? {
+        ta: stageKappa(
+          data.decisions.filter((d) => d.stage === "title_abstract")
+        ),
+        ft: stageKappa(data.decisions.filter((d) => d.stage === "full_text")),
+      }
+    : null;
+
   const factSheet =
     counts && data
       ? buildPrismaFactSheet({
@@ -1177,6 +1187,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           prescreenModels: data.prescreenModels,
           inclusionCriteria: project.inclusion_criteria,
           reasonLabels: (data.reasons ?? []).map((r) => r.label),
+          reliability: reliability ?? undefined,
         })
       : null;
 
@@ -1484,6 +1495,16 @@ export default function PrismaClient({ project }: { project: Project }) {
                   decisions until then, and disagreements are resolved after
                   discussion, with the resolution logged. Every opinion and
                   resolution is timestamped in the exportable screening log.
+                  {(reliability?.ta || reliability?.ft) && (
+                    <>
+                      {" "}
+                      Inter-rater reliability over the recorded independent
+                      opinions appears in the selection process facts above,
+                      as Cohen&apos;s kappa for two reviewers or Fleiss&apos;
+                      kappa when more contributed; conflict resolutions never
+                      enter the statistic.
+                    </>
+                  )}
                 </p>
               </div>
               {usedPrescreen && (

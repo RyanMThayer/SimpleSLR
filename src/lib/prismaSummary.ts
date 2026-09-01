@@ -1,6 +1,7 @@
 import type { ProjectDatabase, SearchConfig } from "./types";
 import { generateQuery, hydrateConfig } from "./searchQuery";
 import { AI_MODELS } from "./aiModels";
+import { kappaPhrase, type KappaResult } from "./kappa";
 
 /**
  * The PRISMA reporting fact sheet: the verified numbers, dates,
@@ -63,6 +64,11 @@ export type FactSheetInput = {
   inclusionCriteria?: string | null;
   /** The exclusion reasons list, in position order. */
   reasonLabels?: string[];
+  /** Inter-rater reliability per stage, when anything was dual screened. */
+  reliability?: {
+    ta: KappaResult | null;
+    ft: KappaResult | null;
+  };
 };
 
 export type FactRow = { label: string; value: string };
@@ -293,6 +299,18 @@ export function buildPrismaFactSheet(input: FactSheetInput): FactSection[] {
       label: "Blinding",
       value:
         "individual decisions concealed until each record reached its required number of assessments",
+    });
+  }
+  if (input.reliability?.ta) {
+    selRows.push({
+      label: "Inter-rater reliability (title and abstract)",
+      value: kappaPhrase(input.reliability.ta),
+    });
+  }
+  if (input.reliability?.ft) {
+    selRows.push({
+      label: "Inter-rater reliability (full text)",
+      value: kappaPhrase(input.reliability.ft),
     });
   }
   if ((input.resolutionsCount ?? 0) > 0) {
