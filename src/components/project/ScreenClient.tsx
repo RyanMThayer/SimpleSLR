@@ -183,6 +183,19 @@ export default function ScreenClient({
   // by anyone on the team, so a member who joins late can still go
   // through everything and add their own decisions.
   const [reviewing, setReviewing] = useState(false);
+  // Filmstrip experiment: keep every record visible as a strip of
+  // squares, decided on the left, undecided on the right. Off by
+  // default; the preference sticks per browser.
+  const [strip, setStrip] = useState(false);
+  // My decided records (the strip's left side) and the AI prescreen's
+  // removals, which stay visible for audit and one-step overrule.
+  const [doneRows, setDoneRows] = useState<RecordRow[]>([]);
+  const [aiRows, setAiRows] = useState<RecordRow[]>([]);
+  // A decided or AI-removed record opened from the strip.
+  const [inspectId, setInspectId] = useState<string | null>(null);
+  // Post-queue collaboration: screening records assigned to teammates.
+  const [helping, setHelping] = useState(false);
+  const [othersRemaining, setOthersRemaining] = useState(0);
   const [myDecisions, setMyDecisions] = useState<
     Map<
       string,
@@ -427,6 +440,40 @@ export default function ScreenClient({
     );
     setTeamScreened(screenedIds.length);
 
+    // The AI prescreen's removals stay visible in the screening room
+    // (strip and review mode) for audit and one-step overrule; they
+    // are not human work, so they never join the queue or the
+    // personal progress totals.
+    const aiRemoved: RecordRow[] = [];
+    if (stage === "title_abstract") {
+      for (let from = 0; ; from += 500) {
+        const { data } = await supabase
+          .from("records")
+          .select("*")
+          .eq("project_id", project.id)
+          .eq("status", "prescreen_excluded")
+          .order("created_at")
+          .range(from, from + 499);
+        aiRemoved.push(...((data ?? []) as RecordRow[]));
+        if (!data || data.length < 500) break;
+      }
+    }
+    setAiRows(aiRemoved);
+    // My decided records power the strip's left side.
+    const myIds = [...decided].filter((id) => activeIds.has(id));
+    const mineRows: RecordRow[] = [];
+    for (let i = 0; i < myIds.length; i += 100) {
+      const { data } = await supabase
+        .from("records")
+        .select("*")
+        .eq("status", "active")
+        .in("id", myIds.slice(i, i + 100));
+      mineRows.push(...((data ?? []) as RecordRow[]));
+    }
+    mineRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    setDoneRows(mineRows);
+    setInspectId(null);
+
     if (reviewing) {
       // Walk everything the team has decided at this stage, oldest
       // first, so any record can be revisited: your own decisions can
@@ -442,6 +489,9 @@ export default function ScreenClient({
           .in("id", screenedIds.slice(i, i + 100));
         revs.push(...((data ?? []) as RecordRow[]));
       }
+      // AI-removed records belong in review too: reviewable, and a
+      // decision key overrules the removal in one step.
+      revs.push(...aiRemoved);
       revs.sort((a, b) => a.created_at.localeCompare(b.created_at));
       setMineTotal(revs.length);
       setMineDone(revs.length);
@@ -529,6 +579,34 @@ export default function ScreenClient({
         setMineTotal(mineAssigned.length);
         setMineDone(mineAssigned.length);
       }
+      // Collaboration door: full text records assigned to teammates
+      // that nobody has decided yet. Any member may take them over.
+      const othersFt =
+        req > 1
+          ? []
+          : retrievable.filter(
+              (r) =>
+                r.ft_assigned_to !== null &&
+                r.ft_assigned_to !== userId &&
+                !teamMap.has(r.id) &&
+                !resMap.has(resKey(stage, r.id))
+            );
+      setOthersRemaining(othersFt.length);
+      if (helping && othersFt.length > 0) {
+        const doneOnOthers = retrievable.filter(
+          (r) =>
+            r.ft_assigned_to !== null &&
+            r.ft_assigned_to !== userId &&
+            decided.has(r.id)
+        ).length;
+        setMineTotal(doneOnOthers + othersFt.length);
+        setMineDone(doneOnOthers);
+        othersFt.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        setError(null);
+        setQueue(othersFt);
+        setIdx(0);
+        return;
+      }
       remaining.sort((a, b) => a.created_at.localeCompare(b.created_at));
       setError(null);
       setQueue(remaining);
@@ -537,6 +615,7 @@ export default function ScreenClient({
     }
 
     if (req > 1) {
+      setOthersRemaining(0);
       // Independent screening: one shared pool. My queue is every
       // active record I have not decided that is still below its
       // opinion quota; workload self-balances across reviewers and
@@ -570,6 +649,37 @@ export default function ScreenClient({
       setMineDone(myActive);
       setError(null);
       setQueue(remaining.slice(0, QUEUE_PAGE));
+      setIdx(0);
+      return;
+    }
+
+    // Collaboration door: records assigned to teammates that nobody
+    // has decided yet. Any member may take them over from the empty
+    // queue screen; assignment is a plan, coverage is the goal.
+    const othersAll: RecordRow[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase
+        .from("records")
+        .select("*")
+        .eq("project_id", project.id)
+        .eq("status", "active")
+        .not("assigned_to", "is", null)
+        .neq("assigned_to", userId)
+        .order("created_at")
+        .range(from, from + 999);
+      othersAll.push(...((data ?? []) as RecordRow[]));
+      if (!data || data.length < 1000) break;
+    }
+    const othersRows = othersAll.filter(
+      (r) => !teamMap.has(r.id) && !resMap.has(resKey(stage, r.id))
+    );
+    setOthersRemaining(othersRows.length);
+    if (helping && othersRows.length > 0) {
+      const doneOnOthers = othersAll.filter((r) => decided.has(r.id)).length;
+      setMineTotal(doneOnOthers + othersRows.length);
+      setMineDone(doneOnOthers);
+      setError(null);
+      setQueue(othersRows.slice(0, QUEUE_PAGE));
       setIdx(0);
       return;
     }
@@ -638,7 +748,7 @@ export default function ScreenClient({
     // requiredFor reads two scalar columns off the project row; the row
     // itself is a stable server prop, so project.id stands in for it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, userId, stage, reviewing]);
+  }, [project.id, userId, stage, reviewing, helping]);
 
   useEffect(() => {
     // Fetch-on-mount: state updates happen after awaits inside load().
@@ -646,8 +756,34 @@ export default function ScreenClient({
     load();
   }, [load]);
 
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStrip(localStorage.getItem("simpleslr-screen-strip") === "1");
+    } catch {
+      // Storage unavailable; the strip just starts off.
+    }
+  }, []);
+  function toggleStrip() {
+    setStrip((on) => {
+      try {
+        localStorage.setItem("simpleslr-screen-strip", on ? "0" : "1");
+      } catch {
+        // Preference just does not stick.
+      }
+      return !on;
+    });
+  }
+
+  const inspected = inspectId
+    ? (queue?.find((r) => r.id === inspectId) ??
+      doneRows.find((r) => r.id === inspectId) ??
+      aiRows.find((r) => r.id === inspectId) ??
+      null)
+    : null;
   const current =
-    queue && queue.length > 0 ? queue[Math.min(idx, queue.length - 1)] : null;
+    inspected ??
+    (queue && queue.length > 0 ? queue[Math.min(idx, queue.length - 1)] : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -690,14 +826,22 @@ export default function ScreenClient({
   }
 
   const goNext = useCallback(() => {
+    if (inspectId) {
+      setInspectId(null);
+      return;
+    }
     if (!queue || queue.length < 2) return;
     setIdx((i) => (i + 1) % queue.length);
-  }, [queue]);
+  }, [queue, inspectId]);
 
   const goPrev = useCallback(() => {
+    if (inspectId) {
+      setInspectId(null);
+      return;
+    }
     if (!queue || queue.length < 2) return;
     setIdx((i) => (i - 1 + queue.length) % queue.length);
-  }, [queue]);
+  }, [queue, inspectId]);
 
   const decide = useCallback(
     async (
@@ -710,6 +854,21 @@ export default function ScreenClient({
       const supabase = createClient();
       // At the full text stage PRISMA wants a reason for every exclusion.
       if (stage === "full_text" && decision === "exclude" && !reasonId) return;
+      // Overruling the AI prescreen in one step: the record returns to
+      // human screening AND carries this decision; the vote record in
+      // the records table stays for the audit trail.
+      const overrulingAi = current.status === "prescreen_excluded";
+      if (overrulingAi) {
+        const { error: restoreErr } = await supabase
+          .from("records")
+          .update({ status: "active" })
+          .eq("id", current.id);
+        if (restoreErr) {
+          setSaving(false);
+          setError(restoreErr.message);
+          return;
+        }
+      }
       const codeId = decision === "include" ? inclusionCodeId : null;
       const row: Record<string, unknown> = {
         project_id: project.id,
@@ -756,14 +915,45 @@ export default function ScreenClient({
         return next;
       });
       const at = Math.min(idx, queue.length - 1);
-      if (reviewing) {
+      const byCreated = (a: RecordRow, b: RecordRow) =>
+        a.created_at.localeCompare(b.created_at);
+      if (overrulingAi) {
+        const restored = { ...current, status: "active" } as RecordRow;
+        setAiRows((rows) => rows.filter((r) => r.id !== restored.id));
+        setDoneRows((rows) =>
+          [...rows.filter((r) => r.id !== restored.id), restored].sort(
+            byCreated
+          )
+        );
+        if (reviewing) {
+          setQueue(
+            (q) => q?.map((r) => (r.id === restored.id ? restored : r)) ?? q
+          );
+          setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+        }
+        setInspectId(null);
+        return;
+      }
+      if (reviewing || inspectId) {
         // Revisiting: the decision is updated in place and the record
-        // stays in the review queue; just move to the next one.
-        setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+        // stays where it is.
+        if (inspectId) {
+          setDoneRows((rows) =>
+            rows.some((r) => r.id === current.id)
+              ? rows
+              : [...rows, current].sort(byCreated)
+          );
+          setInspectId(null);
+        } else {
+          setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+        }
         return;
       }
       undoStack.current.push({ rec: current, at });
       setCanUndo(true);
+      setDoneRows((rows) =>
+        [...rows.filter((r) => r.id !== current.id), current].sort(byCreated)
+      );
       const nq = [...queue.slice(0, at), ...queue.slice(at + 1)];
       setQueue(nq);
       setIdx(at >= nq.length ? 0 : at);
@@ -771,7 +961,18 @@ export default function ScreenClient({
       // The queue loads in pages; when a page is exhausted, fetch the next.
       if (nq.length === 0) load();
     },
-    [current, saving, project.id, userId, queue, idx, load, stage, reviewing]
+    [
+      current,
+      saving,
+      project.id,
+      userId,
+      queue,
+      idx,
+      load,
+      stage,
+      reviewing,
+      inspectId,
+    ]
   );
 
   // The team's final verdict on a revealed conflict; any member may
@@ -861,6 +1062,7 @@ export default function ScreenClient({
     arr.splice(pos, 0, last.rec);
     setQueue(arr);
     setIdx(pos);
+    setDoneRows((rows) => rows.filter((r) => r.id !== last.rec.id));
     setMineDone((d) => Math.max(0, d - 1));
     setCanUndo(undoStack.current.length > 0);
   }, [userId, queue, stage, reviewing]);
@@ -1346,6 +1548,8 @@ export default function ScreenClient({
               if (s !== stage) {
                 setStage(s);
                 setReviewing(false);
+                setHelping(false);
+                setInspectId(null);
                 setQueue(null);
                 undoStack.current = [];
                 setCanUndo(false);
@@ -1360,6 +1564,17 @@ export default function ScreenClient({
             {label}
           </button>
         ))}
+        <button
+          onClick={toggleStrip}
+          className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+            strip
+              ? "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950"
+              : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          }`}
+          title="Keep every record visible as a strip of squares: your decisions on the left, undecided on the right, AI removals in violet. Click any square to open that record."
+        >
+          Strip view
+        </button>
         {stage === "title_abstract" && !reviewing && (
           <div className="ml-auto">
             <PrescreenPanel
@@ -1394,6 +1609,7 @@ export default function ScreenClient({
             ) : (
               <>
                 {mineDone} / {mineTotal} done ({pct}%)
+                {helping && " · helping with teammates' records"}
                 {teamScreened > 0 && (
                   <>
                     {" · "}
@@ -1583,6 +1799,59 @@ export default function ScreenClient({
         </p>
       )}
 
+      {strip && !reviewing && queue && (
+        <div
+          className="mb-4 flex flex-wrap content-start gap-[3px]"
+          aria-label="Every record at this stage: violet was removed by the AI prescreen, green and red are your decisions, gray is undecided"
+        >
+          {aiRows.map((r) => (
+            <button
+              key={r.id}
+              title={`${r.title} — removed by the AI prescreen; click to inspect or overrule`}
+              onClick={() => setInspectId(r.id)}
+              className={`h-2.5 w-2.5 rounded-[2px] bg-violet-500 transition-transform hover:scale-125 ${
+                current?.id === r.id
+                  ? "ring-2 ring-teal-600 ring-offset-1 dark:ring-teal-400"
+                  : ""
+              }`}
+            />
+          ))}
+          {doneRows.map((r) => (
+            <button
+              key={r.id}
+              title={`${r.title} — your decision: ${
+                myDecisions.get(r.id)?.decision ?? "recorded"
+              }; click to revisit`}
+              onClick={() => setInspectId(r.id)}
+              className={`h-2.5 w-2.5 rounded-[2px] ${
+                myDecisions.get(r.id)?.decision === "include"
+                  ? "bg-emerald-600"
+                  : "bg-red-600"
+              } transition-transform hover:scale-125 ${
+                current?.id === r.id
+                  ? "ring-2 ring-teal-600 ring-offset-1 dark:ring-teal-400"
+                  : ""
+              }`}
+            />
+          ))}
+          {queue.map((r, i) => (
+            <button
+              key={r.id}
+              title={`${r.title} — undecided; click to screen it`}
+              onClick={() => {
+                setInspectId(null);
+                setIdx(i);
+              }}
+              className={`h-2.5 w-2.5 rounded-[2px] bg-zinc-300 transition-transform hover:scale-125 dark:bg-zinc-600 ${
+                !inspectId && i === Math.min(idx, queue.length - 1)
+                  ? "ring-2 ring-teal-600 ring-offset-1 dark:ring-teal-400"
+                  : ""
+              }`}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
         {/* ---------------- Record ---------------- */}
         <div className="flex min-w-0 flex-1 flex-col">
@@ -1601,6 +1870,18 @@ export default function ScreenClient({
                     : "You have screened everything currently assigned to you. Import more records, ask the owner to distribute unassigned ones, or review the results in the records table."}
               </p>
               <div className="flex flex-wrap justify-center gap-3">
+                {!reviewing && !helping && othersRemaining > 0 && (
+                  <button
+                    onClick={() => {
+                      setHelping(true);
+                      setQueue(null);
+                    }}
+                    className={`${btn} bg-teal-700 text-white hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300`}
+                    title="These records are assigned to teammates and still undecided; your decisions count for the team"
+                  >
+                    Screen teammates&apos; remaining records ({othersRemaining})
+                  </button>
+                )}
                 {!reviewing && teamScreened > 0 && (
                   <button
                     onClick={() => {
@@ -1714,6 +1995,32 @@ export default function ScreenClient({
                     </>
                   )}
                 </p>
+                {current.status === "prescreen_excluded" && (
+                  <p className="mb-3 rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200">
+                    Removed by the AI prescreen. Press a decision key (or
+                    use the sidebar) to overrule: the record returns to
+                    human screening with your decision recorded. The full
+                    vote record stays in the records table.
+                  </p>
+                )}
+                {Boolean(inspectId) &&
+                  current.status !== "prescreen_excluded" &&
+                  myDecisions.has(current.id) && (
+                    <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+                      Your decision:{" "}
+                      <span
+                        className={
+                          myDecisions.get(current.id)?.decision === "include"
+                            ? "font-medium text-emerald-600 dark:text-emerald-400"
+                            : "font-medium text-red-600 dark:text-red-400"
+                        }
+                      >
+                        {myDecisions.get(current.id)?.decision}
+                      </span>
+                      {" · "}press a key to change it, or → to return to the
+                      queue.
+                    </p>
+                  )}
                 {(stage !== "full_text" || !pdfUrl || showAbstract) &&
                   (editingAbs ? (
                     <div className="mt-1 flex max-w-3xl flex-col gap-2">

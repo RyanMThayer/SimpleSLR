@@ -165,7 +165,14 @@ export default function ProjectHome({
       // screened records (decided while unassigned) join the member's
       // total, so done can never exceed the total.
       const taSet = taDecidedBy.get(m.user_id) ?? new Set<string>();
-      const myAssigned = activeSlim.filter((r) => r.assigned_to === m.user_id);
+      // A record assigned to this member but decided by a helping
+      // teammate is done for the team and leaves this member's
+      // personal total, so a finished stage reads finished.
+      const myAssigned = activeSlim.filter(
+        (r) =>
+          r.assigned_to === m.user_id &&
+          (taSet.has(r.id) || (taByRecord.get(r.id)?.length ?? 0) === 0)
+      );
       const myDecidedActive = activeSlim.filter((r) => taSet.has(r.id));
       // Independent screening (quota above 1): assignment pools do not
       // apply; a member's total is what they decided plus what still
@@ -191,7 +198,9 @@ export default function ProjectHome({
       const ftSet = ftDecidedBy.get(m.user_id) ?? new Set<string>();
       const retrievable = eligible.filter((r) => r.retrieval_status === null);
       const myFtAssigned = retrievable.filter(
-        (r) => r.ft_assigned_to === m.user_id
+        (r) =>
+          r.ft_assigned_to === m.user_id &&
+          (ftSet.has(r.id) || (ftCountByRecord.get(r.id) ?? 0) === 0)
       );
       const myFtDecided = retrievable.filter((r) => ftSet.has(r.id));
       const ftUnion =
