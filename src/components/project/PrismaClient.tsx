@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { btnSecondary as exportBtn } from "@/lib/ui";
 import { buildBibtex, buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
@@ -16,6 +16,29 @@ import {
   formatLongDate,
 } from "@/lib/prismaSummary";
 import { stageKappa } from "@/lib/kappa";
+import { refById } from "@/lib/references";
+
+/** Citation line under a methodology block, linking into /references. */
+function Sources({ ids }: { ids: string[] }) {
+  return (
+    <p className="mt-1 font-sans text-[12.5px] leading-5 text-zinc-500 dark:text-zinc-400">
+      Sources:{" "}
+      {ids.map((id, i) => (
+        <Fragment key={id}>
+          {i > 0 && "; "}
+          <a
+            href={`/references#${id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2"
+          >
+            {refById(id).cite}
+          </a>
+        </Fragment>
+      ))}
+    </p>
+  );
+}
 import {
   extractionPrompt,
   factsUserPrompt,
@@ -1188,6 +1211,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           inclusionCriteria: project.inclusion_criteria,
           reasonLabels: (data.reasons ?? []).map((r) => r.label),
           reliability: reliability ?? undefined,
+          picot: project.picot ?? null,
         })
       : null;
 
@@ -1466,7 +1490,18 @@ export default function PrismaClient({ project }: { project: Project }) {
               What this tool actually did in this review, so reviewers of
               your manuscript can verify the process. Only the procedures
               this review used are shown; cite SimpleSLR with the version
-              date and reference the descriptions that apply.
+              date and reference the descriptions that apply. Each
+              procedure follows published methodology; its sources are
+              cited below and collected on the{" "}
+              <a
+                href="/references"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                references page
+              </a>
+              .
             </p>
             <div className="flex flex-col gap-3 font-serif text-[14.5px] leading-7 text-zinc-700 dark:text-zinc-300">
               <div>
@@ -1481,6 +1516,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   matching year, are reviewed by the team, and are merged
                   toward a single kept record.
                 </p>
+                <Sources ids={["rethlefsen2021"]} />
               </div>
               <div>
                 <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1506,6 +1542,15 @@ export default function PrismaClient({ project }: { project: Project }) {
                     </>
                   )}
                 </p>
+                <Sources
+                  ids={[
+                    "page2021",
+                    "waffenschmidt2019",
+                    ...(reliability?.ta || reliability?.ft
+                      ? ["cohen1960", "fleiss1971", "landiskoch1977"]
+                      : []),
+                  ]}
+                />
               </div>
               {usedPrescreen && (
                 <div>
@@ -1526,6 +1571,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                     validation mode replays the pipeline on human-screened
                     records to measure agreement before live use.
                   </p>
+                  <Sources ids={["khraisha2024"]} />
                   <PromptDisclosure
                     title="the exact prompts"
                     intro={`Prompt version ${PRESCREEN_PROMPT_VERSION}, temperature 0${
@@ -1548,8 +1594,12 @@ export default function PrismaClient({ project }: { project: Project }) {
                     with per-seed provenance recorded. Papers already in the
                     corpus are consolidated onto their existing record rather
                     than duplicated, and identification counts follow the
-                    PRISMA 2020 two-arm layout.
+                    PRISMA 2020 two-arm layout. Each snowballing round is
+                    recorded; the tool does not enforce Wohlin&apos;s
+                    stopping rule (iterate until no new papers), so state
+                    the stopping decision in the manuscript.
                   </p>
+                  <Sources ids={["wohlin2014", "websterwatson2002"]} />
                 </div>
               )}
               {usedSynthesis && (
@@ -1564,6 +1614,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                     {usedAiPass &&
                       " AI-suggested passages are quarantined until a researcher individually accepts or rejects each one, and suggested quotes are verified verbatim against the extracted text before they can appear."}
                   </p>
+                  <Sources ids={["websterwatson2002", "fain2025"]} />
                   {usedAiPass && (
                     <PromptDisclosure
                       title="the exact concept pass prompt"
@@ -1583,6 +1634,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   settled team outcomes, and report optional features only
                   when they were actually used.
                 </p>
+                <Sources ids={["page2021", "page2021ee", "vombrocke2009"]} />
               </div>
             </div>
           </section>

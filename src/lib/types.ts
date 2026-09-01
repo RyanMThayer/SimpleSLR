@@ -65,11 +65,26 @@ export type ImportBatch = {
   created_at: string;
 };
 
+/**
+ * Optional PICOT framing of the research question (population or
+ * problem, intervention or interest, comparison, outcome, time).
+ * Any part may be empty; IS reviews often use only a subset.
+ */
+export type PicotFrame = {
+  population: string;
+  intervention: string;
+  comparison: string;
+  outcome: string;
+  time: string;
+};
+
 export type Project = {
   id: string;
   name: string;
   research_objective: string | null;
   research_question: string | null;
+  /** Absent before migration 0024. */
+  picot?: Partial<PicotFrame> | null;
   inclusion_criteria: string | null;
   exclusion_criteria: string | null;
   include_keywords: string[];

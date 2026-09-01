@@ -11,6 +11,9 @@ export default function SiteFooter() {
     "hover:text-zinc-600 dark:hover:text-zinc-300 underline-offset-4 hover:underline";
   return (
     <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-6 py-6 text-xs text-zinc-400 dark:text-zinc-500">
+      <Link href="/references" className={link}>
+        References
+      </Link>
       <Link href="/privacy" className={link}>
         Privacy
       </Link>

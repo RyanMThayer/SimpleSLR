@@ -5,7 +5,39 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { requiredFor, settledOutcome } from "@/lib/outcomes";
 import { fetchResolutions, resKey } from "@/lib/resolutions";
-import type { Project, ProjectMember } from "@/lib/types";
+import type { PicotFrame, Project, ProjectMember } from "@/lib/types";
+
+/** PICOT parts in display order, with the labels shown in the UI. */
+export const PICOT_PARTS: { key: keyof PicotFrame; label: string }[] = [
+  { key: "population", label: "Population / problem" },
+  { key: "intervention", label: "Intervention / interest" },
+  { key: "comparison", label: "Comparison" },
+  { key: "outcome", label: "Outcome" },
+  { key: "time", label: "Time frame" },
+];
+
+/** A full frame from a possibly partial stored value. */
+function emptyPicot(stored: Partial<PicotFrame> | null | undefined): PicotFrame {
+  return {
+    population: stored?.population ?? "",
+    intervention: stored?.intervention ?? "",
+    comparison: stored?.comparison ?? "",
+    outcome: stored?.outcome ?? "",
+    time: stored?.time ?? "",
+  };
+}
+
+/** Trimmed frame for storage; null when every part is empty. */
+function storablePicot(p: PicotFrame): PicotFrame | null {
+  const trimmed = {
+    population: p.population.trim(),
+    intervention: p.intervention.trim(),
+    comparison: p.comparison.trim(),
+    outcome: p.outcome.trim(),
+    time: p.time.trim(),
+  };
+  return Object.values(trimmed).some(Boolean) ? trimmed : null;
+}
 
 /**
  * Research questions are stored one per line, usually typed as
@@ -48,6 +80,7 @@ export default function ProjectHome({
   const [editingRq, setEditingRq] = useState(false);
   const [objective, setObjective] = useState(project.research_objective ?? "");
   const [questions, setQuestions] = useState(project.research_question ?? "");
+  const [picot, setPicot] = useState<PicotFrame>(emptyPicot(project.picot));
   const [savingRq, setSavingRq] = useState(false);
 
   const load = useCallback(async () => {
@@ -330,6 +363,11 @@ export default function ProjectHome({
       .update({
         research_objective: objective.trim() || null,
         research_question: questions.trim() || null,
+        // The column arrives with migration 0024; before that the
+        // select returns no key at all and we must not write it.
+        ...(project.picot !== undefined
+          ? { picot: storablePicot(picot) }
+          : {}),
       })
       .eq("id", project.id);
     setSavingRq(false);
@@ -407,6 +445,7 @@ export default function ProjectHome({
                   setEditingRq(false);
                   setObjective(project.research_objective ?? "");
                   setQuestions(project.research_question ?? "");
+                  setPicot(emptyPicot(project.picot));
                 }}
                 className="text-xs text-zinc-500 dark:text-zinc-400 underline underline-offset-2"
               >
@@ -435,6 +474,40 @@ export default function ProjectHome({
                 onChange={(e) => setQuestions(e.target.value)}
               />
             </label>
+            <div className="mt-1 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <p className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                PICOT framing (optional)
+              </p>
+              <p className="mb-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                A structured view of the question: population or problem,
+                intervention or interest, comparison, outcome, time frame.
+                Fill only the parts that apply; the recorded parts appear
+                on the Report page beside the eligibility criteria.
+              </p>
+              <div className="flex flex-col gap-2">
+                {PICOT_PARTS.map(({ key, label }) => (
+                  <label
+                    key={key}
+                    className="grid grid-cols-[170px_1fr] items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                  >
+                    {label}
+                    <input
+                      type="text"
+                      className={rqInput}
+                      value={picot[key]}
+                      onChange={(e) =>
+                        setPicot((p) => ({ ...p, [key]: e.target.value }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              {project.picot === undefined && (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-500">
+                  Saving the PICOT parts needs database migration 0024.
+                </p>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-3 px-5 py-4">
@@ -468,6 +541,25 @@ export default function ProjectHome({
               <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
                 No research questions yet.
               </p>
+            )}
+            {storablePicot(picot) && (
+              <div className="grid grid-cols-[44px_1fr] gap-y-1 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                {PICOT_PARTS.filter(({ key }) => picot[key].trim()).map(
+                  ({ key, label }) => (
+                    <Fragment key={key}>
+                      <b
+                        className="pt-0.5 font-mono text-[11.5px] font-medium text-teal-700 dark:text-teal-400"
+                        title={label}
+                      >
+                        {label[0]}
+                      </b>
+                      <span className="font-serif text-[14.5px] leading-normal text-zinc-700 dark:text-zinc-300">
+                        {picot[key].trim()}
+                      </span>
+                    </Fragment>
+                  )
+                )}
+              </div>
             )}
           </div>
         )}

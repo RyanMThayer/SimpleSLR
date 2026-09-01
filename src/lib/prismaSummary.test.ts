@@ -128,6 +128,32 @@ describe("buildPrismaFactSheet", () => {
     );
   });
 
+  it("adds a PICOT row only when parts are recorded, listing only set parts", () => {
+    const without = buildPrismaFactSheet(input());
+    expect(
+      without[0].rows.some((r) => r.label === "Question framing (PICOT)")
+    ).toBe(false);
+
+    const withPicot = buildPrismaFactSheet(
+      input({
+        picot: {
+          population: "EU municipal governments",
+          intervention: "e-participation platforms",
+          outcome: "citizen uptake",
+          comparison: "",
+        },
+      })
+    );
+    const row = withPicot[0].rows.find(
+      (r) => r.label === "Question framing (PICOT)"
+    )!;
+    expect(row.value).toBe(
+      "Population: EU municipal governments · Intervention: e-participation platforms · Outcome: citizen uptake"
+    );
+    // PICOT leads the eligibility section when present.
+    expect(withPicot[0].rows[0].label).toBe("Question framing (PICOT)");
+  });
+
   it("reports per-source hits, imports, and search dates", () => {
     const sections = buildPrismaFactSheet(
       input({

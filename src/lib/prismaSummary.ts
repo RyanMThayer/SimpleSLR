@@ -1,4 +1,4 @@
-import type { ProjectDatabase, SearchConfig } from "./types";
+import type { PicotFrame, ProjectDatabase, SearchConfig } from "./types";
 import { generateQuery, hydrateConfig } from "./searchQuery";
 import { AI_MODELS } from "./aiModels";
 import { kappaPhrase, type KappaResult } from "./kappa";
@@ -69,6 +69,8 @@ export type FactSheetInput = {
     ta: KappaResult | null;
     ft: KappaResult | null;
   };
+  /** Optional PICOT framing of the research question. */
+  picot?: Partial<PicotFrame> | null;
 };
 
 export type FactRow = { label: string; value: string };
@@ -177,7 +179,22 @@ export function buildPrismaFactSheet(input: FactSheetInput): FactSection[] {
   // ------------------------------------------------------------------
   // Item 5: eligibility criteria.
   // ------------------------------------------------------------------
-  const critRows: FactRow[] = [
+  const critRows: FactRow[] = [];
+  const picotParts: [string, string | undefined][] = [
+    ["Population", input.picot?.population],
+    ["Intervention", input.picot?.intervention],
+    ["Comparison", input.picot?.comparison],
+    ["Outcome", input.picot?.outcome],
+    ["Time frame", input.picot?.time],
+  ];
+  const picotSet = picotParts.filter(([, v]) => v?.trim());
+  if (picotSet.length > 0) {
+    critRows.push({
+      label: "Question framing (PICOT)",
+      value: picotSet.map(([k, v]) => `${k}: ${v!.trim()}`).join(" · "),
+    });
+  }
+  critRows.push(
     {
       label: "Inclusion criteria",
       value: input.inclusionCriteria?.trim() || "[not recorded yet]",
@@ -190,8 +207,8 @@ export function buildPrismaFactSheet(input: FactSheetInput): FactSection[] {
               .map((l, i) => `E${i + 1}: ${l}`)
               .join("; ")
           : "[no exclusion reasons recorded yet]",
-    },
-  ];
+    }
+  );
   sections.push({
     item: "Item 5",
     title: "Eligibility criteria",

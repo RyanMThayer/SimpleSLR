@@ -43,6 +43,20 @@ test("legal pages carry the provider identity", async ({ page }) => {
   await expect(page.locator("h1")).toHaveText("Terms of service");
 });
 
+test("references page lists the methodological literature", async ({ page }) => {
+  await page.goto("/references");
+  await expect(page.locator("h1")).toHaveText("References");
+  await expect(page.getByText("The PRISMA 2020 statement", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("Analyzing the past to prepare for the future", { exact: false })
+  ).toBeVisible();
+  // Every DOI link resolves through doi.org.
+  const hrefs = await page
+    .locator('a[href^="https://doi.org/"]')
+    .evaluateAll((els) => els.length);
+  expect(hrefs).toBeGreaterThan(5);
+});
+
 test("security headers are set", async ({ request }) => {
   const res = await request.get("/");
   expect(res.headers()["content-security-policy"]).toBeTruthy();
