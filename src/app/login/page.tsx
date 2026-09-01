@@ -24,12 +24,14 @@ declare global {
           initialize: (config: {
             client_id: string;
             nonce?: string;
+            use_fedcm_for_prompt?: boolean;
             callback: (response: { credential: string }) => void;
           }) => void;
           renderButton: (
             element: HTMLElement,
             config: Record<string, unknown>
           ) => void;
+          prompt: (listener?: (notification: unknown) => void) => void;
         };
       };
     };
@@ -92,6 +94,9 @@ export default function LoginPage() {
   const [cooldown, setCooldown] = useState(0);
   const configured = isSupabaseConfigured();
   // Google Identity Services state: script loaded, container, nonce.
+  // PRIVACY: nothing loads from Google until the visitor clicks the
+  // Google button, so simply opening the login page contacts nobody.
+  const [gsiRequested, setGsiRequested] = useState(false);
   const [gsiLoaded, setGsiLoaded] = useState(false);
   // Until Google's button has actually rendered, the classic redirect
   // flow button stands in, so a blocked or failed script never leaves
@@ -101,7 +106,7 @@ export default function LoginPage() {
   const nonceRef = useRef<{ raw: string; hashed: string } | null>(null);
 
   useEffect(() => {
-    if (!configured || !GOOGLE_CLIENT_ID) return;
+    if (!configured || !GOOGLE_CLIENT_ID || !gsiRequested) return;
     if (document.getElementById("gsi-client")) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setGsiLoaded(true);
@@ -113,7 +118,7 @@ export default function LoginPage() {
     script.async = true;
     script.onload = () => setGsiLoaded(true);
     document.head.appendChild(script);
-  }, [configured]);
+  }, [configured, gsiRequested]);
 
   useEffect(() => {
     if (!gsiLoaded || !GOOGLE_CLIENT_ID || mode === "forgot") return;
@@ -126,6 +131,7 @@ export default function LoginPage() {
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         nonce: nonceRef.current.hashed,
+        use_fedcm_for_prompt: true,
         callback: async (response) => {
           setLoading(true);
           setMessage(null);
@@ -156,6 +162,14 @@ export default function LoginPage() {
         width: Math.min(400, el.offsetWidth || 336),
       });
       setGsiRendered(true);
+      // One prompt straight away, so the click that loaded Google
+      // usually completes the sign in; if the browser suppresses it,
+      // the real Google button now sits where the placeholder was.
+      try {
+        window.google.accounts.id.prompt();
+      } catch {
+        // The rendered button remains the path.
+      }
     })();
     return () => {
       cancelled = true;
@@ -312,7 +326,11 @@ export default function LoginPage() {
                   {!gsiRendered && (
                     <button
                       type="button"
-                      onClick={signInWithGoogle}
+                      onClick={() =>
+                        GOOGLE_CLIENT_ID
+                          ? setGsiRequested(true)
+                          : signInWithGoogle()
+                      }
                       disabled={loading}
                       className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-zinc-300 bg-white text-base font-medium text-zinc-800 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
                     >

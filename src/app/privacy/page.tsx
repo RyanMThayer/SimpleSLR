@@ -17,8 +17,8 @@ export default function PrivacyPage() {
     <LegalPage title="Privacy policy" updated="August 31, 2026">
       <LegalSection heading="Who is responsible">
         <p>
-          SimpleSLR (simpleslr.de) is operated by [YOUR FULL NAME],
-          [STREET AND NUMBER], [POSTAL CODE AND CITY], Germany (the
+          SimpleSLR (simpleslr.de) is operated by Ryan Thayer,
+          Goethestraße 5, [POSTAL CODE AND CITY], Germany (the
           controller under the EU General Data Protection Regulation,
           GDPR). You can reach us at{" "}
           <a className="underline underline-offset-2" href="mailto:support@simpleslr.de">
@@ -87,13 +87,27 @@ export default function PrivacyPage() {
 
       <LegalSection heading="Cookies and local storage">
         <p>
-          We use only the session cookies that are strictly necessary to
-          keep you signed in. There are no analytics, no tracking, no
-          advertising, and no third party cookies, which is why we do
-          not show a cookie banner. Your browser&apos;s local storage
-          holds your interface theme, your API keys if you save them,
-          and AI cost calibration figures; none of this is transmitted
-          to us.
+          We set only the cookies that are strictly necessary for
+          signing in, all first party: the Supabase session cookie
+          (named sb-…-auth-token, sometimes split into numbered parts),
+          which keeps you signed in and is refreshed while you use the
+          service, and a short-lived sb-…-code-verifier cookie that
+          exists only during a sign in and secures the exchange. There
+          are no analytics, no tracking, no advertising, and no third
+          party cookies, which is why we do not show a cookie banner.
+        </p>
+        <p>
+          Your browser&apos;s local storage holds your interface theme,
+          your AI API keys if you save them, your screening view
+          preference, and AI cost calibration figures. None of this is
+          transmitted to us; keys travel only to the AI provider you
+          chose, per request.
+        </p>
+        <p>
+          The optional Google sign in loads Google&apos;s sign in
+          script only after you click the Google button; merely opening
+          the login page contacts no third party. From that click on,
+          Google processes the sign in under its own privacy policy.
         </p>
       </LegalSection>
 
@@ -106,10 +120,15 @@ export default function PrivacyPage() {
           support address). If you choose to sign in with Google, Google
           processes that sign in under its own terms. If you run AI
           features, Anthropic or OpenAI receives the record text as
-          described above. Where processing happens outside the EU or
-          EEA, it is safeguarded by EU standard contractual clauses or
-          an adequacy decision such as the EU-US Data Privacy Framework,
-          as applicable.
+          described above. These providers act as processors bound by
+          data processing agreements. Where processing happens outside
+          the EU or EEA, it is safeguarded by EU standard contractual
+          clauses or an adequacy decision such as the EU-US Data
+          Privacy Framework, as applicable.
+        </p>
+        <p>
+          SimpleSLR is a tool for academic research and is not directed
+          at children.
         </p>
       </LegalSection>
 

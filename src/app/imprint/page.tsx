@@ -17,9 +17,9 @@ export default function ImprintPage() {
     <LegalPage title="Imprint" updated="August 31, 2026">
       <LegalSection heading="Provider (Sec. 5 DDG)">
         <p>
-          [YOUR FULL NAME]
+          Ryan Thayer
           <br />
-          [STREET AND NUMBER]
+          Goethestraße 5
           <br />
           [POSTAL CODE AND CITY]
           <br />
@@ -38,7 +38,7 @@ export default function ImprintPage() {
 
       <LegalSection heading="Responsible for content (Sec. 18(2) MStV)">
         <p>
-          [YOUR FULL NAME], address as above.
+          Ryan Thayer, address as above.
         </p>
       </LegalSection>
 
