@@ -11,26 +11,40 @@ export const metadata: Metadata = {
 
 /**
  * Public works-cited page. Every procedure in the tool traces to
- * published systematic review methodology; this page lists the
- * sources, grouped by what they ground, so review teams can cite
- * them in their manuscripts alongside the tool.
+ * published systematic literature review methodology; this page
+ * lists the sources, grouped by what they ground, so review teams
+ * can cite them in their manuscripts alongside the tool.
  */
-export default function ReferencesPage() {
+export default async function ReferencesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; project?: string }>;
+}) {
+  // Arriving from a project's Report page carries the project id, so
+  // the back link returns there instead of the public landing page.
+  const sp = await searchParams;
+  const projectId =
+    sp.from === "report" && /^[0-9a-f-]{36}$/i.test(sp.project ?? "")
+      ? sp.project
+      : null;
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-zinc-950">
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
         <Link
-          href="/"
+          href={projectId ? `/projects/${projectId}/prisma` : "/"}
           className="text-sm text-zinc-500 underline-offset-4 hover:text-zinc-700 hover:underline dark:text-zinc-400 dark:hover:text-zinc-200"
         >
-          &larr; SimpleSLR
+          {projectId ? <>&larr; Back to the report</> : <>&larr; SimpleSLR</>}
         </Link>
         <h1 className="mt-5 font-serif text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           References
         </h1>
         <p className="mt-3 mb-8 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           SimpleSLR&apos;s workflow is not invented here: each procedure
-          follows published systematic review methodology. These are the
+          follows published systematic literature review methodology,
+          from the PRISMA 2020 reporting standard to the Webster and
+          Watson tradition of literature reviews in information systems.
+          These are the
           sources the process is built on, grouped by what they ground in
           the tool. The Report page inside a project cites them next to
           the procedures your review actually used, so you can carry the

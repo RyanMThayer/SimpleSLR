@@ -19,7 +19,7 @@ import { stageKappa } from "@/lib/kappa";
 import { refById } from "@/lib/references";
 
 /** Citation line under a methodology block, linking into /references. */
-function Sources({ ids }: { ids: string[] }) {
+function Sources({ ids, projectId }: { ids: string[]; projectId: string }) {
   return (
     <p className="mt-1 font-sans text-[12.5px] leading-5 text-zinc-500 dark:text-zinc-400">
       Sources:{" "}
@@ -27,9 +27,7 @@ function Sources({ ids }: { ids: string[] }) {
         <Fragment key={id}>
           {i > 0 && "; "}
           <a
-            href={`/references#${id}`}
-            target="_blank"
-            rel="noreferrer"
+            href={`/references?from=report&project=${projectId}#${id}`}
             className="underline underline-offset-2"
           >
             {refById(id).cite}
@@ -1483,9 +1481,17 @@ export default function PrismaClient({ project }: { project: Project }) {
           </section>
 
           <section className={section}>
-            <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-              How SimpleSLR works, for your methods section
-            </h2>
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                How SimpleSLR works
+              </h2>
+              <a
+                href={`/references?from=report&project=${project.id}`}
+                className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-800 print:hidden dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                Works cited
+              </a>
+            </div>
             <p className="mb-4 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
               What this tool actually did in this review, so reviewers of
               your manuscript can verify the process. Only the procedures
@@ -1494,9 +1500,7 @@ export default function PrismaClient({ project }: { project: Project }) {
               procedure follows published methodology; its sources are
               cited below and collected on the{" "}
               <a
-                href="/references"
-                target="_blank"
-                rel="noreferrer"
+                href={`/references?from=report&project=${project.id}`}
                 className="underline underline-offset-2"
               >
                 references page
@@ -1516,7 +1520,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   matching year, are reviewed by the team, and are merged
                   toward a single kept record.
                 </p>
-                <Sources ids={["rethlefsen2021"]} />
+                <Sources projectId={project.id} ids={["rethlefsen2021"]} />
               </div>
               <div>
                 <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1543,6 +1547,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   )}
                 </p>
                 <Sources
+                  projectId={project.id}
                   ids={[
                     "page2021",
                     "waffenschmidt2019",
@@ -1571,7 +1576,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                     validation mode replays the pipeline on human-screened
                     records to measure agreement before live use.
                   </p>
-                  <Sources ids={["khraisha2024"]} />
+                  <Sources projectId={project.id} ids={["khraisha2024"]} />
                   <PromptDisclosure
                     title="the exact prompts"
                     intro={`Prompt version ${PRESCREEN_PROMPT_VERSION}, temperature 0${
@@ -1599,7 +1604,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                     stopping rule (iterate until no new papers), so state
                     the stopping decision in the manuscript.
                   </p>
-                  <Sources ids={["wohlin2014", "websterwatson2002"]} />
+                  <Sources projectId={project.id} ids={["wohlin2014", "websterwatson2002"]} />
                 </div>
               )}
               {usedSynthesis && (
@@ -1614,7 +1619,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                     {usedAiPass &&
                       " AI-suggested passages are quarantined until a researcher individually accepts or rejects each one, and suggested quotes are verified verbatim against the extracted text before they can appear."}
                   </p>
-                  <Sources ids={["websterwatson2002", "fain2025"]} />
+                  <Sources projectId={project.id} ids={["websterwatson2002", "fain2025"]} />
                   {usedAiPass && (
                     <PromptDisclosure
                       title="the exact concept pass prompt"
@@ -1634,7 +1639,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   settled team outcomes, and report optional features only
                   when they were actually used.
                 </p>
-                <Sources ids={["page2021", "page2021ee", "vombrocke2009"]} />
+                <Sources projectId={project.id} ids={["page2021", "page2021ee", "vombrocke2009"]} />
               </div>
             </div>
           </section>
