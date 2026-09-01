@@ -785,6 +785,29 @@ export default function ScreenClient({
     inspected ??
     (queue && queue.length > 0 ? queue[Math.min(idx, queue.length - 1)] : null);
 
+  // With the strip on, navigation walks EVERY record in strip order
+  // (AI removals, then my decided, then undecided), not just the
+  // undecided queue.
+  const stripList = useMemo(
+    () =>
+      strip && !reviewing && queue
+        ? [...aiRows, ...doneRows, ...queue]
+        : null,
+    [strip, reviewing, queue, aiRows, doneRows]
+  );
+  const openStripItem = useCallback(
+    (r: RecordRow) => {
+      const qi = queue?.findIndex((x) => x.id === r.id) ?? -1;
+      if (qi >= 0) {
+        setInspectId(null);
+        setIdx(qi);
+      } else {
+        setInspectId(r.id);
+      }
+    },
+    [queue]
+  );
+
   useEffect(() => {
     let cancelled = false;
     // Reset viewer state when the record or stage changes.
@@ -826,22 +849,34 @@ export default function ScreenClient({
   }
 
   const goNext = useCallback(() => {
+    if (stripList && current && stripList.length > 1) {
+      const i = stripList.findIndex((r) => r.id === current.id);
+      openStripItem(stripList[(Math.max(0, i) + 1) % stripList.length]);
+      return;
+    }
     if (inspectId) {
       setInspectId(null);
       return;
     }
     if (!queue || queue.length < 2) return;
     setIdx((i) => (i + 1) % queue.length);
-  }, [queue, inspectId]);
+  }, [queue, inspectId, stripList, current, openStripItem]);
 
   const goPrev = useCallback(() => {
+    if (stripList && current && stripList.length > 1) {
+      const i = stripList.findIndex((r) => r.id === current.id);
+      openStripItem(
+        stripList[(Math.max(0, i) - 1 + stripList.length) % stripList.length]
+      );
+      return;
+    }
     if (inspectId) {
       setInspectId(null);
       return;
     }
     if (!queue || queue.length < 2) return;
     setIdx((i) => (i - 1 + queue.length) % queue.length);
-  }, [queue, inspectId]);
+  }, [queue, inspectId, stripList, current, openStripItem]);
 
   const decide = useCallback(
     async (
@@ -917,6 +952,29 @@ export default function ScreenClient({
       const at = Math.min(idx, queue.length - 1);
       const byCreated = (a: RecordRow, b: RecordRow) =>
         a.created_at.localeCompare(b.created_at);
+      // With the strip on, an in-place change or AI overrule advances
+      // to the NEXT record in strip order (computed against the
+      // pre-mutation arrays; the moved record keeps its position).
+      const stripAll =
+        strip && !reviewing ? [...aiRows, ...doneRows, ...queue] : null;
+      const stripNext = (() => {
+        if (!stripAll || stripAll.length < 2) return null;
+        const i = stripAll.findIndex((r) => r.id === current.id);
+        return i === -1 ? null : stripAll[(i + 1) % stripAll.length];
+      })();
+      const advanceAfterInspect = () => {
+        if (stripNext) {
+          const qi = queue.findIndex((x) => x.id === stripNext.id);
+          if (qi >= 0) {
+            setInspectId(null);
+            setIdx(qi);
+          } else {
+            setInspectId(stripNext.id);
+          }
+        } else {
+          setInspectId(null);
+        }
+      };
       if (overrulingAi) {
         const restored = { ...current, status: "active" } as RecordRow;
         setAiRows((rows) => rows.filter((r) => r.id !== restored.id));
@@ -930,8 +988,10 @@ export default function ScreenClient({
             (q) => q?.map((r) => (r.id === restored.id ? restored : r)) ?? q
           );
           setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
+          setInspectId(null);
+          return;
         }
-        setInspectId(null);
+        advanceAfterInspect();
         return;
       }
       if (reviewing || inspectId) {
@@ -943,7 +1003,7 @@ export default function ScreenClient({
               ? rows
               : [...rows, current].sort(byCreated)
           );
-          setInspectId(null);
+          advanceAfterInspect();
         } else {
           setIdx(queue.length > 1 ? (at + 1) % queue.length : 0);
         }
@@ -972,6 +1032,9 @@ export default function ScreenClient({
       stage,
       reviewing,
       inspectId,
+      strip,
+      aiRows,
+      doneRows,
     ]
   );
 
