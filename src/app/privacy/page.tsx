@@ -18,7 +18,7 @@ export default function PrivacyPage() {
       <LegalSection heading="Who is responsible">
         <p>
           SimpleSLR (simpleslr.de) is operated by Ryan Thayer,
-          Goethestraße 5, [POSTAL CODE AND CITY], Germany (the
+          Goethestraße 5, 56218 Mülheim-Kärlich, Germany (the
           controller under the EU General Data Protection Regulation,
           GDPR). You can reach us at{" "}
           <a className="underline underline-offset-2" href="mailto:support@simpleslr.de">

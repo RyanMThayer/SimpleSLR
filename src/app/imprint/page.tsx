@@ -21,7 +21,7 @@ export default function ImprintPage() {
           <br />
           Goethestraße 5
           <br />
-          [POSTAL CODE AND CITY]
+          56218 Mülheim-Kärlich
           <br />
           Germany
         </p>
