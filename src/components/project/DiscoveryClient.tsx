@@ -29,9 +29,9 @@ import type {
 const inputCls =
   "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-teal-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50";
 const primaryBtn =
-  "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
+  "rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
 const ghostBtn =
-  "rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
 export default function DiscoveryClient({
   project,
@@ -463,7 +463,7 @@ export default function DiscoveryClient({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Discovery
       </h1>
       <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
@@ -493,7 +493,7 @@ export default function DiscoveryClient({
       {/* ---------------- Search string builder ---------------- */}
       <section className={`${card} mb-6`}>
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Search string
           </h2>
           <button
@@ -733,7 +733,7 @@ export default function DiscoveryClient({
 
       {/* ---------------- Search limits ---------------- */}
       <section className={`${card} mb-6`}>
-        <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+        <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Search limits
         </h2>
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
@@ -832,7 +832,7 @@ export default function DiscoveryClient({
 
       {/* ---------------- Databases ---------------- */}
       <section className="mb-6">
-        <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+        <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           Databases
         </h2>
         <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1069,7 +1069,7 @@ export default function DiscoveryClient({
       {/* ---------------- Citation searching imports ---------------- */}
       {snowballBatches.length > 0 && (
         <section className={`${card} mb-6`}>
-          <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="mb-2 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Citation searching (snowballing)
           </h2>
           <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1091,7 +1091,7 @@ export default function DiscoveryClient({
               </span>
               <button
                 onClick={() => removeRedundantImports(redundantSnowball)}
-                className="rounded-full border border-amber-400 px-3 py-1 text-sm transition-colors hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
+                className="rounded-md border border-amber-400 px-3 py-1 text-sm transition-colors hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900"
               >
                 Remove redundant import(s)
               </button>
@@ -1134,7 +1134,7 @@ export default function DiscoveryClient({
       {/* ---------------- Unlinked imports (pre discovery) ---------------- */}
       {unlinkedBatches.length > 0 && (
         <section className={card}>
-          <h2 className="mb-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="mb-2 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Imports not linked to a database
           </h2>
           <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">

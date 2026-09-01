@@ -537,7 +537,7 @@ export default function ConceptsClient({
   // ------------------------------------------------------------------
 
     const ghostBtn =
-    "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+    "rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
   const inputCls =
     "rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100";
 
@@ -649,7 +649,7 @@ export default function ConceptsClient({
           },
         ]}
       />
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Concept matrix
       </h1>
 

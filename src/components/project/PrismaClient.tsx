@@ -1150,7 +1150,7 @@ export default function PrismaClient({ project }: { project: Project }) {
     
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Report
       </h1>
       <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1182,7 +1182,7 @@ export default function PrismaClient({ project }: { project: Project }) {
 
           <section className={`${card} mb-6`}>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Flow diagram
               </h2>
               <div className="flex flex-wrap gap-2">
@@ -1209,7 +1209,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           {summary && (
             <section className={`${card} mb-6`}>
               <div className="mb-1 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                   Written summary
                 </h2>
                 <button
@@ -1240,7 +1240,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           )}
 
           <section className={`${card} mb-6`}>
-            <h2 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <h2 className="mb-3 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Identification per source
             </h2>
             <table className="w-full text-sm tabular-nums">
@@ -1271,7 +1271,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           </section>
 
           <section className={card}>
-            <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Exports
             </h2>
             <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
@@ -1309,7 +1309,7 @@ export default function PrismaClient({ project }: { project: Project }) {
           </section>
 
           <section className={`${card} mt-6`}>
-            <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               How SimpleSLR works, for your methods section
             </h2>
             <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">

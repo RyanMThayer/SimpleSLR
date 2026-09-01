@@ -82,7 +82,7 @@ export default function ApiKeysCard() {
       {stored && (
         <button
           onClick={() => remove(provider)}
-          className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
+          className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
         >
           Remove
         </button>
@@ -93,7 +93,7 @@ export default function ApiKeysCard() {
   return (
     <div className="mb-6 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
       <div>
-        <h2 className="mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-50">
+        <h2 className="mb-1 font-serif text-base font-semibold text-zinc-900 dark:text-zinc-50">
           AI API keys
         </h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
@@ -133,7 +133,7 @@ export default function ApiKeysCard() {
         <button
           onClick={save}
           disabled={!draft.trim()}
-          className="rounded-full border border-zinc-300 px-4 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+          className="rounded-md border border-zinc-300 px-4 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
         >
           Save
         </button>

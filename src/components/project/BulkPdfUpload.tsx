@@ -169,7 +169,7 @@ export default function BulkPdfUpload({
           setOpen(true);
           loadCandidates();
         }}
-        className="rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        className="rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
       >
         Bulk PDF upload
       </button>
@@ -289,7 +289,7 @@ export default function BulkPdfUpload({
             <button
               onClick={uploadAll}
               disabled={uploadingAll || processing || readyCount === 0}
-              className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             >
               {uploadingAll
                 ? "Uploading..."

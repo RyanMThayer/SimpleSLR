@@ -167,7 +167,7 @@ export default function ThemeMenu({ email }: { email?: string | null }) {
               <button
                 type="submit"
                 disabled={nameBusy || (nameDraft.trim() || null) === displayName}
-                className="rounded-full border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                className="rounded-md border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
               >
                 Save
               </button>

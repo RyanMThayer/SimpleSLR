@@ -25,7 +25,7 @@ export default function SettingsClient({
         .eq("project_id", project.id)
         .eq("user_id", userId)
         .maybeSingle();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+       
       setIsOwner(data?.role === "owner");
     })();
   }, [project.id, userId]);
@@ -91,7 +91,7 @@ export default function SettingsClient({
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8">
-      <h1 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-6 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Project settings
       </h1>
 
@@ -116,7 +116,7 @@ export default function SettingsClient({
           <button
             onClick={save}
             disabled={saving || !isOwner}
-            className="rounded-full bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+            className="rounded-md bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
           >
             {saving ? "Saving..." : "Save"}
           </button>
@@ -130,7 +130,7 @@ export default function SettingsClient({
 
       <div className="mb-6 flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
         <div>
-          <h2 className="mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="mb-1 font-serif text-base font-semibold text-zinc-900 dark:text-zinc-50">
             Independent screening
           </h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-300">

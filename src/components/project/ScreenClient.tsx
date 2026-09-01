@@ -1308,7 +1308,7 @@ export default function ScreenClient({
   const rKeys = reasonKeyMap(reasons);
 
   const btn =
-    "rounded-full px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50";
+    "rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50";
   const sideCard =
     "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
   const keyChip =
@@ -1351,7 +1351,7 @@ export default function ScreenClient({
                 setCanUndo(false);
               }
             }}
-            className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
+            className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
               stage === s
                 ? "bg-teal-700 text-white dark:bg-teal-400 dark:text-teal-950"
                 : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
@@ -1537,7 +1537,7 @@ export default function ScreenClient({
                       <button
                         onClick={() => resolveConflict("include")}
                         disabled={resolveBusy}
-                        className="rounded-full bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
+                        className="rounded-md bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
                       >
                         Resolve: include
                       </button>
@@ -1563,7 +1563,7 @@ export default function ScreenClient({
                         <button
                           onClick={() => resolveConflict("exclude")}
                           disabled={resolveBusy}
-                          className="rounded-full border border-red-400 px-2.5 py-0.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-red-700 dark:text-red-300"
+                          className="rounded-md border border-red-400 px-2.5 py-0.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-red-700 dark:text-red-300"
                         >
                           Resolve: exclude
                         </button>
@@ -1590,7 +1590,7 @@ export default function ScreenClient({
             <p className="text-zinc-600 dark:text-zinc-400">Loading your queue...</p>
           ) : current === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-              <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              <h2 className="font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
                 Queue empty. Nice work.
               </h2>
               <p className="max-w-md text-zinc-600 dark:text-zinc-400">
@@ -1629,7 +1629,7 @@ export default function ScreenClient({
           ) : (
             <>
               <article className="mb-4 flex flex-1 flex-col overflow-y-auto rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-                <h2 className="mb-2 text-2xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
+                <h2 className="mb-2 font-serif text-[22px] font-semibold leading-snug text-zinc-900 dark:text-zinc-50">
                   <Highlighted
                     text={current.title}
                     include={kwInclude}
@@ -1728,7 +1728,7 @@ export default function ScreenClient({
                         <button
                           onClick={saveAbstract}
                           disabled={pasteBusy || !pasteAbs.trim()}
-                          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
                           {pasteBusy ? "Saving..." : "Save abstract"}
                         </button>
@@ -1737,7 +1737,7 @@ export default function ScreenClient({
                             setEditingAbs(false);
                             setPasteAbs("");
                           }}
-                          className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
                           Cancel
                         </button>
@@ -1745,7 +1745,7 @@ export default function ScreenClient({
                     </div>
                   ) : current.abstract ? (
                     <div>
-                      <p className="whitespace-pre-line leading-7 text-zinc-800 dark:text-zinc-200">
+                      <p className="whitespace-pre-line text-[15px] leading-7 text-zinc-800 dark:text-zinc-200">
                         <Highlighted
                           text={current.abstract}
                           include={kwInclude}
@@ -1780,7 +1780,7 @@ export default function ScreenClient({
                           <button
                             onClick={saveAbstract}
                             disabled={pasteBusy}
-                            className="self-start rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            className="self-start rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                           >
                             {pasteBusy ? "Saving..." : "Save abstract"}
                           </button>
@@ -1809,7 +1809,10 @@ export default function ScreenClient({
                   ))}
               </article>
 
-              <div className="flex flex-wrap items-center justify-center gap-3 pb-2">
+              {/* Only the neutral actions live under the record; every
+                  exclude control is a sidebar row, so the reason list
+                  and the buttons are one thing, never two copies. */}
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pb-2">
                 <button
                   onClick={() => decide("include")}
                   disabled={saving}
@@ -1820,29 +1823,11 @@ export default function ScreenClient({
                 <button
                   onClick={goNext}
                   disabled={saving || (queue?.length ?? 0) < 2}
-                  className={`${btn} bg-amber-500 text-white hover:bg-amber-400`}
+                  className={`${btn} border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
                   title="Leave undecided and look at the next record; it stays in the queue"
                 >
                   Skip (→)
                 </button>
-                {stage !== "full_text" ? (
-                  <button
-                    onClick={() => decide("exclude")}
-                    disabled={saving}
-                    className={`${btn} bg-red-600 text-white hover:bg-red-500`}
-                  >
-                    Exclude, no reason (E)
-                  </button>
-                ) : (
-                  <button
-                    onClick={markNoAccess}
-                    disabled={saving}
-                    className={`${btn} border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800`}
-                    title="Full text could not be accessed; reported as 'not retrieved' in the PRISMA diagram"
-                  >
-                    No access (N)
-                  </button>
-                )}
                 <button
                   onClick={undo}
                   disabled={!canUndo}
@@ -1864,7 +1849,7 @@ export default function ScreenClient({
           <div className={sideCard}>
             <button
               onClick={() => setCriteriaOpen(!criteriaOpen)}
-              className="flex w-full items-center justify-between text-sm font-semibold text-zinc-900 dark:text-zinc-50"
+              className="flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400"
             >
               Criteria
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -1961,7 +1946,7 @@ export default function ScreenClient({
 
           <div className={sideCard}>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                 Exclude with reason
               </h3>
               {isOwner && (<button
@@ -2077,7 +2062,7 @@ export default function ScreenClient({
                 />
                 <button
                   type="submit"
-                  className="rounded-full border border-zinc-300 px-3 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="rounded-md border border-zinc-300 px-3 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   Add
                 </button>
@@ -2090,11 +2075,34 @@ export default function ScreenClient({
                 Give them any free letter (or digit) via manage.
               </p>
             )}
+
+            <div className="mt-1 border-t border-zinc-100 pt-1 dark:border-zinc-800">
+              {stage !== "full_text" ? (
+                <button
+                  onClick={() => decide("exclude")}
+                  disabled={saving || !current}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-red-950"
+                >
+                  <span className={keyChip}>E</span>
+                  <span className="min-w-0 flex-1">Exclude, no reason</span>
+                </button>
+              ) : (
+                <button
+                  onClick={markNoAccess}
+                  disabled={saving || !current}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  title="Full text could not be accessed; reported as 'not retrieved' in the PRISMA diagram"
+                >
+                  <span className={keyChip}>N</span>
+                  <span className="min-w-0 flex-1">No access, not retrievable</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className={sideCard}>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              <h3 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                 Include
               </h3>
               <button
@@ -2204,7 +2212,7 @@ export default function ScreenClient({
                 />
                 <button
                   type="submit"
-                  className="rounded-full border border-zinc-300 px-3 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="rounded-md border border-zinc-300 px-3 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   Add
                 </button>
@@ -2252,7 +2260,7 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => resolveIncDelete("keep")}
-                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Keep them included, just drop the code
               </button>
@@ -2274,14 +2282,14 @@ export default function ScreenClient({
                 <button
                   onClick={() => resolveIncDelete("migrate")}
                   disabled={!incMigrateTarget}
-                  className="rounded-full border border-zinc-300 px-4 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="rounded-md border border-zinc-300 px-4 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   Move
                 </button>
               </div>
               <button
                 onClick={() => resolveIncDelete("reset")}
-                className="rounded-full border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                className="rounded-md border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
               >
                 Unmark them: decisions removed, back to the screening queue
               </button>
@@ -2290,7 +2298,7 @@ export default function ScreenClient({
                   setIncDelete(null);
                   setIncMigrateTarget("");
                 }}
-                className="rounded-full px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                className="rounded-md px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 Cancel
               </button>
@@ -2316,19 +2324,19 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => confirmIncEdit(false)}
-                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Keep the decisions (small fix)
               </button>
               <button
                 onClick={() => confirmIncEdit(true)}
-                className="rounded-full border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                className="rounded-md border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
               >
                 Reset them: back to the screening queue
               </button>
               <button
                 onClick={() => setIncEditConfirm(null)}
-                className="rounded-full px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                className="rounded-md px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 Cancel
               </button>
@@ -2355,13 +2363,13 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={aiRevertRestore}
-                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Criteria changed: restore the {aiRevert} record(s)
               </button>
               <button
                 onClick={() => setAiRevert(null)}
-                className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
                 Small fix: keep them removed
               </button>
@@ -2385,13 +2393,13 @@ export default function ScreenClient({
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => confirmEdit(false)}
-                className="rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 hover:bg-teal-800 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
               >
                 Small fix: keep the {editConfirm.affected} decision(s)
               </button>
               <button
                 onClick={() => confirmEdit(true)}
-                className="rounded-full border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
               >
                 Real change: return those records to the queue
               </button>

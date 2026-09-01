@@ -207,7 +207,7 @@ export default function DuplicatesClient({
           onClick={() => markDuplicate(other, r)}
           disabled={busy}
           title="Keeps this record active; the other one becomes its duplicate. Missing details (DOI, abstract, PDF...) are copied over first."
-          className="rounded-full bg-teal-700 px-4 py-1.5 text-xs font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+          className="rounded-md bg-teal-700 px-4 py-1.5 text-xs font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
         >
           Keep this one
         </button>
@@ -245,7 +245,7 @@ export default function DuplicatesClient({
           },
         ]}
       />
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Possible duplicates
       </h1>
       <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-300">

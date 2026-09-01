@@ -1682,7 +1682,7 @@ export default function ReadClient({
         ]}
       />
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="font-serif text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           Reading room
         </h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -1754,12 +1754,12 @@ export default function ReadClient({
             ) : (
               <>
               <div className="sticky top-0 z-10 mb-2 flex justify-end">
-                <div className="flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-1 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+                <div className="flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
                   <button
                     onClick={() =>
                       setScale((s) => Math.max(0.5, Math.round((s / 1.2) * 100) / 100))
                     }
-                    className="rounded-full px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className="rounded-md px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     title="Zoom out"
                   >
                     −
@@ -1771,14 +1771,14 @@ export default function ReadClient({
                     onClick={() =>
                       setScale((s) => Math.min(3, Math.round(s * 1.2 * 100) / 100))
                     }
-                    className="rounded-full px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className="rounded-md px-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     title="Zoom in (larger text is easier to select precisely)"
                   >
                     +
                   </button>
                   <button
                     onClick={() => setScale(fitScaleRef.current)}
-                    className="rounded-full px-2 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className="rounded-md px-2 text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     title="Fit page width"
                   >
                     Fit
@@ -1817,7 +1817,7 @@ export default function ReadClient({
                 <button
                   onClick={() => setRecIdx((i) => Math.max(0, i - 1))}
                   disabled={recIdx === 0}
-                  className="rounded-full border border-zinc-300 px-2.5 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                  className="rounded-md border border-zinc-300 px-2.5 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   ←
                 </button>
@@ -1829,7 +1829,7 @@ export default function ReadClient({
                     setRecIdx((i) => Math.min(papers.length - 1, i + 1))
                   }
                   disabled={recIdx >= papers.length - 1}
-                  className="rounded-full border border-zinc-300 px-2.5 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                  className="rounded-md border border-zinc-300 px-2.5 py-1 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   →
                 </button>
@@ -1924,7 +1924,7 @@ export default function ReadClient({
                     onClick={runAiPass}
                     disabled={aiBusy || !current?.fulltext_path}
                     title="Reads this one paper only and suggests concept passages; every suggestion is verified verbatim against the PDF text and waits for your accept or reject."
-                    className="rounded-full bg-teal-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                    className="rounded-md bg-teal-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
                   >
                     {aiBusy ? "Reading..." : "Suggest concepts for this paper"}
                   </button>
@@ -1998,14 +1998,14 @@ export default function ReadClient({
                           <button
                             onClick={() => acceptSuggestion(sg)}
                             disabled={decidingSug !== null}
-                            className="rounded-full bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
+                            className="rounded-md bg-emerald-700 px-2.5 py-0.5 text-xs font-medium text-white disabled:opacity-50"
                           >
                             Accept
                           </button>
                           <button
                             onClick={() => rejectSuggestion(sg)}
                             disabled={decidingSug !== null}
-                            className="rounded-full border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                            className="rounded-md border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
                           >
                             Reject
                           </button>
@@ -2143,7 +2143,7 @@ export default function ReadClient({
                 <button
                   type="submit"
                   disabled={!newConcept.trim()}
-                  className="rounded-full border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                  className="rounded-md border border-zinc-300 px-3 text-sm text-zinc-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   Add
                 </button>

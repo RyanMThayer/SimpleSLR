@@ -854,9 +854,9 @@ export default function SnowballClient({
   const selectedCount = candidates?.filter((c) => c.selected && !c.existing).length ?? 0;
 
     const primaryBtn =
-    "rounded-full bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
+    "rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300";
   const ghostBtn =
-    "rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+    "rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">
@@ -867,7 +867,7 @@ export default function SnowballClient({
         className="hidden"
         onChange={onRefFilePicked}
       />
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Snowballing
       </h1>
       <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
@@ -897,7 +897,7 @@ export default function SnowballClient({
 
       <section className={`${card} mb-6`}>
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="mr-auto text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="mr-auto font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             Seeds ({selectedSeeds.size} of {seeds?.length ?? 0})
           </h2>
           <button
@@ -953,7 +953,7 @@ export default function SnowballClient({
                     setMNote(null);
                   }}
                   title="Import this paper's references or cited-by list from a Scopus / Web of Science file export"
-                  className="shrink-0 rounded-full border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  className="shrink-0 rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
                 >
                   file import
                 </button>
@@ -1016,7 +1016,7 @@ export default function SnowballClient({
       {candidates !== null && (
         <section className={card}>
           <div className="mb-3 flex flex-wrap items-center gap-3">
-            <h2 className="mr-auto text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <h2 className="mr-auto font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Candidates: {newCount} new, {existingCount} already in corpus
             </h2>
             <select

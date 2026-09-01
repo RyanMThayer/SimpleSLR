@@ -61,13 +61,13 @@ export default function ApiKeyInfoModal({
         >
           <div className="flex min-h-0 flex-col overflow-y-auto p-6">
           <div className="mb-3 flex items-start justify-between gap-3">
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Your API key
             </h2>
             <button
               onClick={onClose}
               aria-label="Close"
-              className="rounded-full px-2 py-0.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="rounded-md px-2 py-0.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               ✕
             </button>
@@ -167,7 +167,7 @@ export default function ApiKeyInfoModal({
                 <button
                   onClick={() => remove("anthropic")}
                   disabled={!storedKeys.anthropic}
-                  className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
+                  className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
                 >
                   {storedKeys.anthropic
                     ? "Remove Anthropic key"
@@ -176,7 +176,7 @@ export default function ApiKeyInfoModal({
                 <button
                   onClick={() => remove("openai")}
                   disabled={!storedKeys.openai}
-                  className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
+                  className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:border-red-400 hover:text-red-700 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-700 dark:hover:text-red-300"
                 >
                   {storedKeys.openai
                     ? "Remove OpenAI key"

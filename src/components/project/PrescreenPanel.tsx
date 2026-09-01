@@ -408,7 +408,7 @@ export default function PrescreenPanel({
   }
 
   const btn =
-    "rounded-full border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+    "rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
   return (
     <>
@@ -430,14 +430,14 @@ export default function PrescreenPanel({
           >
             <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 AI prescreen
               </h2>
               <button
                 onClick={() => setOpen(false)}
                 disabled={running !== null}
                 aria-label="Close"
-                className="rounded-full px-2 py-0.5 text-sm text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                className="rounded-md px-2 py-0.5 text-sm text-zinc-500 hover:bg-zinc-100 disabled:opacity-40 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 ✕
               </button>
@@ -517,7 +517,7 @@ export default function PrescreenPanel({
                     <button
                       onClick={addReason}
                       disabled={addingReason || !newReason.trim()}
-                      className="rounded-full border border-amber-400 px-3 text-sm font-normal transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:hover:bg-amber-900"
+                      className="rounded-md border border-amber-400 px-3 text-sm font-normal transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:hover:bg-amber-900"
                     >
                       Add
                     </button>
@@ -526,7 +526,7 @@ export default function PrescreenPanel({
                 <button
                   onClick={saveSetup}
                   disabled={!ready || savingSetup}
-                  className="self-start rounded-full bg-amber-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-800 disabled:opacity-50"
+                  className="self-start rounded-md bg-amber-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-800 disabled:opacity-50"
                 >
                   {savingSetup ? "Saving..." : "Save and unlock the prescreen"}
                 </button>
@@ -578,7 +578,7 @@ export default function PrescreenPanel({
               <button
                 onClick={() => run("live")}
                 disabled={running !== null || !plan || !setupSaved}
-                className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+                className="rounded-md bg-teal-700 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
                 title="Evaluates every unscreened record; unanimously ineligible ones move out of the screening queues."
               >
                 {running === "live" ? "Prescreening..." : "Run on unscreened records"}

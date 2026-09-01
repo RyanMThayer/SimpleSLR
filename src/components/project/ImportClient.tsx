@@ -303,7 +303,7 @@ export default function ImportClient({
             type="file"
             accept=".ris,.txt,.csv,.tsv,.bib,.bibtex"
             onChange={onFile}
-            className="text-sm text-zinc-600 file:mr-3 file:rounded-full file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-zinc-50 dark:text-zinc-400 dark:file:bg-zinc-50 dark:file:text-zinc-900"
+            className="text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-zinc-50 dark:text-zinc-400 dark:file:bg-zinc-50 dark:file:text-zinc-900"
           />
         </label>
       </div>
@@ -353,7 +353,7 @@ export default function ImportClient({
           <button
             onClick={runImport}
             disabled={importing}
-            className="rounded-full bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+            className="rounded-md bg-teal-700 px-5 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
           >
             {importing ? (progress ?? "Importing...") : "Import"}
           </button>

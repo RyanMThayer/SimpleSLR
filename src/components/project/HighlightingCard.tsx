@@ -124,7 +124,7 @@ export default function HighlightingCard({
               onClick={suggestFromSearch}
               disabled={seeding}
               title="Prefill both lists from the Discovery page's search strategy: concept group terms turn green, NOT group terms turn red. Review and Save."
-              className="shrink-0 rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="shrink-0 rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {seeding ? "Reading search..." : "Suggest from search"}
             </button>
@@ -151,7 +151,7 @@ export default function HighlightingCard({
             <button
               onClick={save}
               disabled={saving}
-              className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
+              className="rounded-md bg-teal-700 px-4 py-1.5 text-sm font-medium text-zinc-50 transition-colors hover:bg-teal-800 disabled:opacity-50 dark:bg-teal-400 dark:text-teal-950 dark:hover:bg-teal-300"
             >
               {saving ? "Saving..." : "Save"}
             </button>
