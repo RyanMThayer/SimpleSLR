@@ -25,11 +25,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
         {/* Applies the stored theme (or the OS preference) before first
-            paint, so there is no light flash when dark is chosen. */}
+            paint, so there is no light flash when dark is chosen; also
+            lifts dark mode while printing so paper output is always
+            light, restoring it afterward. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              '(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);}catch(e){}})();',
+              '(function(){try{var c=document.documentElement.classList;var t=localStorage.getItem("theme");var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);c.toggle("dark",d);window.addEventListener("beforeprint",function(){if(c.contains("dark")){c.add("print-was-dark");c.remove("dark");}});window.addEventListener("afterprint",function(){if(c.contains("print-was-dark")){c.add("dark");c.remove("print-was-dark");}});}catch(e){}})();',
           }}
         />
         {children}

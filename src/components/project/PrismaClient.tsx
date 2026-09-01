@@ -1150,10 +1150,19 @@ export default function PrismaClient({ project }: { project: Project }) {
     
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8">
-      <h1 className="mb-1 font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        Report
-      </h1>
-      <p className="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h1 className="font-serif text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          Report
+        </h1>
+        <button
+          onClick={() => window.print()}
+          className={`${exportBtn} print:hidden`}
+          title="Prints the diagram, summary, source table, and methodology as a clean document; use the print dialog's Save as PDF for a file"
+        >
+          Print / save as PDF
+        </button>
+      </div>
+      <p className="mb-6 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
         Everything the review produces, in one place: the PRISMA 2020 flow
         diagram, the written methods summary, the exports, and a description
         of the methodology behind this tool for citing and reporting. Every
@@ -1185,7 +1194,7 @@ export default function PrismaClient({ project }: { project: Project }) {
               <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Flow diagram
               </h2>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 print:hidden">
                 <button
                   onClick={exportPptx}
                   className={exportBtn}
@@ -1201,7 +1210,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
+            <div className="overflow-x-auto rounded-lg border border-zinc-100 print:overflow-visible print:border-0 dark:border-zinc-800">
               <PrismaDiagram counts={counts} svgRef={svgRef} />
             </div>
           </section>
@@ -1214,13 +1223,13 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </h2>
                 <button
                   onClick={copySummary}
-                  className={exportBtn}
+                  className={`${exportBtn} print:hidden`}
                   title="Copy the whole summary to the clipboard"
                 >
                   {copied ? "Copied" : "Copy text"}
                 </button>
               </div>
-              <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+              <p className="mb-4 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
                 A methods section draft in PRISMA 2020 reporting style, built
                 from the same live data as the diagram. Paste it into your
                 paper as a starting point and fill in anything shown in
@@ -1230,7 +1239,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 {summary.map((p, i) => (
                   <p
                     key={i}
-                    className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200"
+                    className="font-serif text-[15px] leading-7 text-zinc-800 dark:text-zinc-200"
                   >
                     {p}
                   </p>
@@ -1270,7 +1279,7 @@ export default function PrismaClient({ project }: { project: Project }) {
             </table>
           </section>
 
-          <section className={card}>
+          <section className={`${card} print:hidden`}>
             <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Exports
             </h2>
@@ -1318,9 +1327,9 @@ export default function PrismaClient({ project }: { project: Project }) {
               SimpleSLR with the version date and reproduce whichever
               descriptions apply to your review.
             </p>
-            <div className="flex flex-col gap-3 text-sm text-zinc-700 dark:text-zinc-300">
+            <div className="flex flex-col gap-3 font-serif text-[14.5px] leading-7 text-zinc-700 dark:text-zinc-300">
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Identification and deduplication
                 </h3>
                 <p>
@@ -1333,7 +1342,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </p>
               </div>
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Screening
                 </h3>
                 <p>
@@ -1348,7 +1357,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </p>
               </div>
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Automated prescreening (optional)
                 </h3>
                 <p>
@@ -1367,7 +1376,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </p>
               </div>
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Citation searching
                 </h3>
                 <p>
@@ -1380,7 +1389,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </p>
               </div>
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Synthesis
                 </h3>
                 <p>
@@ -1394,7 +1403,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                 </p>
               </div>
               <div>
-                <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Reporting
                 </h3>
                 <p>
@@ -1404,7 +1413,7 @@ export default function PrismaClient({ project }: { project: Project }) {
                   when they were actually used.
                 </p>
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="font-sans text-xs text-zinc-500 print:hidden dark:text-zinc-400">
                 Questions about any of these procedures:{" "}
                 <a
                   href="mailto:support@simpleslr.de"

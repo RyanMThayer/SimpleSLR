@@ -78,6 +78,29 @@ body {
 }
 
 /*
+ * Printing (the Report page's "Print / save as PDF" and any browser
+ * print): white paper, sensible margins, and no clipped diagram. A
+ * beforeprint hook in the root layout lifts dark mode for the
+ * duration, so dark theme users never print white-on-dark cards.
+ */
+@media print {
+  @page {
+    margin: 16mm;
+  }
+  body {
+    background: #fff;
+  }
+  main {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  svg {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/*
  * Keyboard focus is a first class citizen in a hotkey driven tool:
  * one consistent, visible ring on every interactive element. :where()
  * keeps specificity at zero so component styles still win when they

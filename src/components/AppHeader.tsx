@@ -11,7 +11,7 @@ export default function AppHeader({
   projectId?: string | null;
 }) {
   return (
-    <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 print:hidden dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-center gap-3 overflow-hidden">
         <Link
           href="/dashboard"
