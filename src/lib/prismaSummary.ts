@@ -3,12 +3,13 @@ import { generateQuery, hydrateConfig } from "./searchQuery";
 import { AI_MODELS } from "./aiModels";
 
 /**
- * Builds the written PRISMA 2020 summary shown under the flow diagram:
- * plain prose covering the information sources, search string, limits,
- * and every selection number the diagram reports. Everything is derived
- * from live data; gaps the team still has to fill in (a missing search
- * date, an unrecorded search string) appear in [brackets] so they are
- * impossible to miss when pasting into a manuscript.
+ * The PRISMA reporting fact sheet: the verified numbers, dates,
+ * strings, and settings behind the flow diagram, organized by PRISMA
+ * 2020 checklist item. Deliberately NOT prose: researchers draft the
+ * methods section in their own words from these facts, so the writing
+ * stays theirs while the data stays exact. Gaps the team still has to
+ * fill (a missing search date, an unrecorded search string) appear in
+ * [brackets] so they are impossible to miss.
  */
 
 /** Structural subset of the PRISMA page's per arm counters. */
@@ -44,26 +45,34 @@ export type SummaryCounts = {
   ftIncluded: number;
 };
 
-export type SummaryInput = {
+export type FactSheetInput = {
   searchConfig: Partial<SearchConfig> | null;
   databases: ProjectDatabase[];
   counts: SummaryCounts;
   memberCount: number;
-  /** Preformatted date for the work-in-progress note, e.g. "August 24, 2026". */
+  /** Preformatted date for the work-in-progress note. */
   asOf: string;
   /** Opinions required per record at each stage (1 = single screening). */
   requiredTa?: number;
   requiredFt?: number;
-  /** Conflict resolutions recorded (drives the disagreements clause). */
+  /** Conflict resolutions recorded. */
   resolutionsCount?: number;
   /** Model ids used by the AI prescreen, when it removed anything. */
   prescreenModels?: string[];
+  /** The recorded inclusion criteria text. */
+  inclusionCriteria?: string | null;
+  /** The exclusion reasons list, in position order. */
+  reasonLabels?: string[];
 };
 
-/** Sentence-initial small numbers as words, per manuscript convention. */
-function numWord(n: number): string {
-  return ["zero", "one", "two", "three"][n] ?? String(n);
-}
+export type FactRow = { label: string; value: string };
+export type FactSection = {
+  /** PRISMA 2020 checklist item, e.g. "Item 6". */
+  item: string;
+  title: string;
+  rows: FactRow[];
+  note?: string;
+};
 
 function modelLabel(id: string): string {
   return AI_MODELS.find((m) => m.id === id)?.label ?? id;
@@ -111,14 +120,6 @@ export function plural(
   return `${count} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
 }
 
-function wasWere(count: number): string {
-  return count === 1 ? "was" : "were";
-}
-
-function reasonsClause(byReason: { label: string; count: number }[]): string {
-  return byReason.map((r) => `${r.label}, n = ${r.count}`).join("; ");
-}
-
 function fieldsPhrase(cfg: SearchConfig): string {
   if (cfg.fields.fullRecord) return "all searchable fields of each record";
   const sel: string[] = [];
@@ -126,223 +127,249 @@ function fieldsPhrase(cfg: SearchConfig): string {
   if (cfg.fields.abstract) sel.push("abstract");
   if (cfg.fields.keywords) sel.push("keywords");
   if (sel.length === 0 || sel.length === 3) {
-    return "the title, abstract, and keywords";
+    return "title, abstract, and keywords";
   }
-  return `the ${listJoin(sel)}`;
+  return listJoin(sel);
 }
 
-function limitsSentence(cfg: SearchConfig): string {
-  const l = cfg.limits;
-  const parts: string[] = [];
-  if (l.yearFrom !== null && l.yearTo !== null) {
-    parts.push(`published between ${l.yearFrom} and ${l.yearTo}`);
-  } else if (l.yearFrom !== null) {
-    parts.push(`published in ${l.yearFrom} or later`);
-  } else if (l.yearTo !== null) {
-    parts.push(`published in ${l.yearTo} or earlier`);
-  }
-  if (l.languages.trim()) parts.push(`written in ${l.languages.trim()}`);
-  if (l.pubTypes.trim()) {
-    parts.push(`of the following publication types: ${l.pubTypes.trim()}`);
-  }
-  if (parts.length === 0) return "";
-  return ` Results were limited to records ${listJoin(parts)}.`;
+function reasonsBreakdown(byReason: { label: string; count: number }[]): string {
+  return byReason.map((r) => `${r.label}, n = ${r.count}`).join("; ");
 }
 
-export function buildPrismaSummary(input: SummaryInput): string[] {
+function armRows(a: SummaryArm, auto: boolean): FactRow[] {
+  const rows: FactRow[] = [{ label: "Records identified", value: String(a.identified) }];
+  if (auto && a.autoExcluded > 0) {
+    rows.push({
+      label: "Removed before screening by the automated prescreen",
+      value: String(a.autoExcluded),
+    });
+  }
+  rows.push(
+    { label: "Duplicate records removed", value: String(a.duplicates) },
+    { label: "Records screened (title and abstract)", value: String(a.screened) },
+    { label: "Records excluded at title and abstract", value: String(a.taExcluded) },
+    { label: "Reports sought for retrieval", value: String(a.sought) },
+    { label: "Reports not retrieved", value: String(a.notRetrieved) },
+    { label: "Reports assessed for eligibility", value: String(a.assessed) },
+    {
+      label: "Reports excluded at full text",
+      value:
+        a.ftExcluded > 0 && a.ftExcludedByReason.length > 0
+          ? `${a.ftExcluded} (${reasonsBreakdown(a.ftExcludedByReason)})`
+          : String(a.ftExcluded),
+    },
+    { label: "Studies included", value: String(a.ftIncluded) }
+  );
+  return rows;
+}
+
+export function buildPrismaFactSheet(input: FactSheetInput): FactSection[] {
   const c = input.counts;
   const cfg = hydrateConfig(input.searchConfig);
+  const sections: FactSection[] = [];
 
+  // ------------------------------------------------------------------
+  // Item 5: eligibility criteria.
+  // ------------------------------------------------------------------
+  const critRows: FactRow[] = [
+    {
+      label: "Inclusion criteria",
+      value: input.inclusionCriteria?.trim() || "[not recorded yet]",
+    },
+    {
+      label: "Exclusion criteria",
+      value:
+        (input.reasonLabels ?? []).length > 0
+          ? (input.reasonLabels ?? [])
+              .map((l, i) => `E${i + 1}: ${l}`)
+              .join("; ")
+          : "[no exclusion reasons recorded yet]",
+    },
+  ];
+  sections.push({
+    item: "Item 5",
+    title: "Eligibility criteria",
+    rows: critRows,
+  });
+
+  // ------------------------------------------------------------------
+  // Item 6: information sources.
+  // ------------------------------------------------------------------
   const dbByName = new Map(input.databases.map((d) => [d.name, d]));
   const sources = c.perSource.filter((s) => !s.snowball);
-  // Databases marked as searched that have no imports yet still belong
-  // in the information sources sentence.
   const searchedOnly = input.databases.filter(
     (d) => d.searched_on !== null && !sources.some((s) => s.name === d.name)
   );
-
-  if (sources.length === 0 && searchedOnly.length === 0 && c.identified === 0) {
-    return [
-      "Nothing to summarize yet: no searches or imports have been recorded. This summary writes itself from the live data as identification and screening progress.",
-    ];
-  }
-
-  const paragraphs: string[] = [];
-
-  // ------------------------------------------------------------------
-  // Paragraph 1: information sources, search string, limits.
-  // ------------------------------------------------------------------
-  const sourceBits = [
+  const srcRows: FactRow[] = [
     ...sources.map((s) => {
       const when = formatLongDate(dbByName.get(s.name)?.searched_on);
-      const datePart = when ?? "[search date not recorded]";
+      const datePart = when ? `searched ${when}` : "[search date not recorded]";
       const countPart =
         s.rawHits !== null && s.rawHits !== s.imported
-          ? `${plural(s.rawHits, "hit")}, of which ${s.imported} ${wasWere(s.imported)} imported`
-          : `n = ${s.imported}`;
-      return `${s.name} (${datePart}; ${countPart})`;
+          ? `${plural(s.rawHits, "hit")}, ${s.imported} imported`
+          : `${plural(s.imported, "record")} imported`;
+      return { label: s.name, value: `${datePart} · ${countPart}` };
     }),
-    ...searchedOnly.map((d) => {
-      const when = formatLongDate(d.searched_on);
-      const hits =
+    ...searchedOnly.map((d) => ({
+      label: d.name,
+      value: `searched ${formatLongDate(d.searched_on)} · ${
         d.raw_hit_count !== null
           ? `${plural(d.raw_hit_count, "hit")}, none imported yet`
-          : "no records imported yet";
-      return `${d.name} (${when}; ${hits})`;
-    }),
+          : "no records imported yet"
+      }`,
+    })),
   ];
-
-  const p1: string[] = [];
-  if (sourceBits.length > 0) {
-    p1.push(`We searched ${listJoin(sourceBits)}.`);
+  if (c.other.identified > 0) {
+    srcRows.push({
+      label: "Citation searching",
+      value: `backward and forward snowballing of included studies · ${plural(
+        c.other.identified,
+        "record"
+      )} (${c.other.backward} from reference lists, ${c.other.forward} from citing works)`,
+    });
   }
+  if (srcRows.length === 0) {
+    srcRows.push({
+      label: "Sources",
+      value: "[no searches or imports recorded yet]",
+    });
+  }
+  sections.push({
+    item: "Item 6",
+    title: "Information sources",
+    rows: srcRows,
+  });
+
+  // ------------------------------------------------------------------
+  // Item 7: search strategy.
+  // ------------------------------------------------------------------
   const searchString = generateQuery("custom", cfg);
-  if (searchString) {
-    p1.push(
-      `The search covered ${fieldsPhrase(cfg)} and used the following string, adapted to each database's own syntax: ${searchString}.`
-    );
-  } else {
-    p1.push(
-      "[No search string has been recorded yet; enter the search terms in the Discovery view so it can be reported here.]"
-    );
+  const stratRows: FactRow[] = [
+    {
+      label: "Search string",
+      value:
+        searchString ||
+        "[not recorded yet; enter the search terms in the Discovery view]",
+    },
+    { label: "Fields searched", value: fieldsPhrase(cfg) },
+  ];
+  const l = cfg.limits;
+  if (l.yearFrom !== null || l.yearTo !== null) {
+    stratRows.push({
+      label: "Publication years",
+      value:
+        l.yearFrom !== null && l.yearTo !== null
+          ? `${l.yearFrom} to ${l.yearTo}`
+          : l.yearFrom !== null
+            ? `${l.yearFrom} or later`
+            : `${l.yearTo} or earlier`,
+    });
   }
-  const lim = limitsSentence(cfg);
-  if (lim) p1.push(lim.trim());
-  paragraphs.push(p1.join(" "));
+  if (l.languages.trim()) {
+    stratRows.push({ label: "Languages", value: l.languages.trim() });
+  }
+  if (l.pubTypes.trim()) {
+    stratRows.push({ label: "Publication types", value: l.pubTypes.trim() });
+  }
+  sections.push({ item: "Item 7", title: "Search strategy", rows: stratRows });
 
   // ------------------------------------------------------------------
-  // Paragraph 2: selection flow for the databases arm.
+  // Item 8: selection process.
   // ------------------------------------------------------------------
-  const a = c.db;
-  if (a.identified === 0) {
-    paragraphs.push("No records were identified through database searches.");
-  } else {
-    const p2: string[] = [];
-    p2.push(
-      `The database searches identified ${plural(a.identified, "record")}.`
-    );
-    if (a.autoExcluded > 0) {
-      p2.push(
-        `Before screening, ${plural(a.autoExcluded, "record")} ${wasWere(a.autoExcluded)} removed as ineligible by an automation tool.`
-      );
-    }
-    if (a.duplicates > 0) {
-      p2.push(
-        `After removal of ${plural(a.duplicates, "duplicate record")}, ${plural(a.screened, "record")} ${wasWere(a.screened)} screened on title and abstract, and ${a.taExcluded} of them ${wasWere(a.taExcluded)} excluded.`
-      );
-    } else {
-      p2.push(
-        `No duplicates were detected among them, and all ${a.screened} were screened on title and abstract; ${a.taExcluded} ${wasWere(a.taExcluded)} excluded.`
-      );
-    }
-    p2.push(
-      `Full texts were sought for the remaining ${plural(a.sought, "report")}; ${a.notRetrieved} could not be retrieved.`
-    );
-    const dbReasons =
-      a.ftExcluded > 0 && a.ftExcludedByReason.length > 0
-        ? ` (${reasonsClause(a.ftExcludedByReason)})`
-        : "";
-    p2.push(
-      `The ${plural(a.assessed, "report")} obtained ${wasWere(a.assessed)} assessed against the eligibility criteria, and ${a.ftExcluded} ${wasWere(a.ftExcluded)} excluded${dbReasons}.`
-    );
-    p2.push(
-      `This left ${plural(a.ftIncluded, "study", "studies")} from the database searches.`
-    );
-    paragraphs.push(p2.join(" "));
-  }
-
-  // ------------------------------------------------------------------
-  // Paragraph 3: citation searching arm, when it exists.
-  // ------------------------------------------------------------------
-  const o = c.other;
-  if (o.identified > 0) {
-    const p3: string[] = [];
-    p3.push(
-      `To supplement the database searches, backward and forward citation searching of the included studies identified a further ${plural(o.identified, "record")} (${o.backward} from reference lists and ${o.forward} from citing works).`
-    );
-    if (o.duplicates > 0) {
-      p3.push(
-        `Of these, ${plural(o.duplicates, "duplicate")} ${wasWere(o.duplicates)} removed.`
-      );
-    }
-    if (o.autoExcluded > 0) {
-      p3.push(
-        `A further ${plural(o.autoExcluded, "record")} ${wasWere(o.autoExcluded)} removed as ineligible by the automation tool.`
-      );
-    }
-    p3.push(
-      `These records went through the same two stage screening: ${o.taExcluded} ${wasWere(o.taExcluded)} excluded on title and abstract, full texts were sought for ${plural(o.sought, "report")} (${o.notRetrieved} not retrieved), and of the ${plural(o.assessed, "report")} assessed, ${o.ftExcluded} ${wasWere(o.ftExcluded)} excluded${
-        o.ftExcluded > 0 && o.ftExcludedByReason.length > 0
-          ? ` (${reasonsClause(o.ftExcludedByReason)})`
-          : ""
-      }.`
-    );
-    p3.push(
-      `Citation searching contributed ${plural(o.ftIncluded, "additional included study", "additional included studies")}.`
-    );
-    paragraphs.push(p3.join(" "));
-  }
-
-  // ------------------------------------------------------------------
-  // Paragraph 4: process, totals, and the work-in-progress note.
-  //
-  // Settings driven and reported by exception: only what the team
-  // actually used appears. Defaults (single screening, no automation)
-  // produce no sentence, because absence is the reader's assumption
-  // and negative disclosures add length without information.
-  // ------------------------------------------------------------------
-  const p4: string[] = [];
-  p4.push(
-    `Screening at both stages was conducted in SimpleSLR by ${
-      input.memberCount > 1
-        ? `the ${plural(input.memberCount, "member")} of the review team`
-        : "a single reviewer"
-    }.`
-  );
   const kTa = input.requiredTa ?? 1;
   const kFt = input.requiredFt ?? 1;
+  const selRows: FactRow[] = [
+    {
+      label: "Review team",
+      value: plural(input.memberCount, "reviewer"),
+    },
+    {
+      label: "Independent opinions per record",
+      value: `${kTa} at title and abstract · ${kFt} at full text`,
+    },
+  ];
   if (kTa > 1 || kFt > 1) {
-    const coverage =
-      kTa === kFt
-        ? `${numWord(kTa)} reviewers independently assessed each record at both stages`
-        : kTa > 1 && kFt > 1
-          ? `${numWord(kTa)} reviewers independently assessed each record at the title and abstract stage and ${numWord(kFt)} at full text`
-          : kTa > 1
-            ? `${numWord(kTa)} reviewers independently assessed each record at the title and abstract stage`
-            : `${numWord(kFt)} reviewers independently assessed each record at the full text stage`;
-    const sentence = `${coverage.charAt(0).toUpperCase()}${coverage.slice(1)}, with individual decisions concealed until each record had received its required number of assessments${
-      (input.resolutionsCount ?? 0) > 0
-        ? "; disagreements were resolved by discussion within the team"
-        : ""
-    }.`;
-    p4.push(sentence);
+    selRows.push({
+      label: "Blinding",
+      value:
+        "individual decisions concealed until each record reached its required number of assessments",
+    });
   }
-  const totalAuto = a.autoExcluded + o.autoExcluded;
+  if ((input.resolutionsCount ?? 0) > 0) {
+    selRows.push({
+      label: "Conflicts resolved by discussion",
+      value: String(input.resolutionsCount),
+    });
+  }
+  const totalAuto = c.db.autoExcluded + c.other.autoExcluded;
   if (totalAuto > 0) {
     const models =
       (input.prescreenModels ?? []).length > 0
         ? listJoin((input.prescreenModels ?? []).map(modelLabel))
         : "large language models";
-    p4.push(
-      `The ${plural(totalAuto, "record")} removed before screening ${wasWere(totalAuto)} identified by SimpleSLR's automated prescreen, which excludes a record only when independent prompts to ${models} unanimously judge it clearly ineligible under the stated criteria.`
-    );
+    selRows.push({
+      label: "Automated prescreen",
+      value: `${plural(totalAuto, "record")} removed before screening · ${models}, temperature 0 · removal requires unanimous votes citing the same recorded criterion with verbatim evidence, then a final plausibility check · the exact prompts are disclosed under How SimpleSLR works below`,
+    });
   }
-  if (o.identified > 0) {
-    p4.push(
-      `In total, ${plural(c.ftIncluded, "study", "studies")} met all criteria: ${a.ftIncluded} identified through database searching and ${o.ftIncluded} through citation searching.`
-    );
-  } else {
-    p4.push(
-      `In total, ${plural(c.ftIncluded, "study", "studies")} met all criteria.`
-    );
-  }
-  const unfinished = c.taUndecided + c.taConflicts + c.ftUndecided;
-  if (unfinished > 0) {
-    p4.push(
-      `[Screening is still in progress as of ${input.asOf}: ${plural(c.taUndecided, "record")} undecided and ${c.taConflicts} in conflict at title and abstract, with ${c.ftUndecided} awaiting a full text decision. The numbers above are a live snapshot and will change until screening is complete.]`
-    );
-  }
-  paragraphs.push(p4.join(" "));
+  sections.push({
+    item: "Item 8",
+    title: "Selection process",
+    rows: selRows,
+  });
 
-  return paragraphs;
+  // ------------------------------------------------------------------
+  // Item 16a: study selection results, per arm.
+  // ------------------------------------------------------------------
+  sections.push({
+    item: "Item 16a",
+    title: "Study selection · identified via databases",
+    rows: armRows(c.db, true),
+  });
+  if (c.other.identified > 0) {
+    sections.push({
+      item: "Item 16a",
+      title: "Study selection · identified via citation searching",
+      rows: armRows(c.other, true),
+    });
+  }
+  const totalRows: FactRow[] = [
+    {
+      label: "Studies included in the review",
+      value:
+        c.other.identified > 0
+          ? `${c.ftIncluded} (${c.db.ftIncluded} via databases, ${c.other.ftIncluded} via citation searching)`
+          : String(c.ftIncluded),
+    },
+  ];
+  const unfinished = c.taUndecided + c.taConflicts + c.ftUndecided;
+  sections.push({
+    item: "Item 16a",
+    title: "Total",
+    rows: totalRows,
+    note:
+      unfinished > 0
+        ? `[Screening is still in progress as of ${input.asOf}: ${plural(
+            c.taUndecided,
+            "record"
+          )} undecided and ${c.taConflicts} in conflict at title and abstract, ${
+            c.ftUndecided
+          } awaiting a full text decision. These numbers are a live snapshot.]`
+        : undefined,
+  });
+
+  return sections;
+}
+
+/** Plain text rendering of the fact sheet, for the copy button. */
+export function factSheetText(sections: FactSection[]): string {
+  return sections
+    .map((s) =>
+      [
+        `${s.item} · ${s.title}`,
+        ...s.rows.map((r) => `  ${r.label}: ${r.value}`),
+        ...(s.note ? [`  ${s.note}`] : []),
+      ].join("\n")
+    )
+    .join("\n\n");
 }

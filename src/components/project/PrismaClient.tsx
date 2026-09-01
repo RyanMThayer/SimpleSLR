@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { card, btnSecondary as exportBtn } from "@/lib/ui";
+import { btnSecondary as exportBtn } from "@/lib/ui";
 import { buildCsv, buildRis, downloadFile, slugify } from "@/lib/export";
 import {
   decisionsByRecord,
@@ -10,7 +10,22 @@ import {
   settledOutcome,
 } from "@/lib/outcomes";
 import { resKey } from "@/lib/resolutions";
-import { buildPrismaSummary, formatLongDate } from "@/lib/prismaSummary";
+import {
+  buildPrismaFactSheet,
+  factSheetText,
+  formatLongDate,
+} from "@/lib/prismaSummary";
+import {
+  extractionPrompt,
+  factsUserPrompt,
+  FRAMINGS,
+  PRESCREEN_PROMPT_VERSION,
+  vetoPrompt,
+  votePrompt,
+  voteUserPrompt,
+} from "@/lib/prescreen";
+import { systemPrompt as aipassSystemPrompt, vocabBlock } from "@/lib/aipass";
+import PromptDisclosure from "@/components/project/PromptDisclosure";
 import type {
   ExclusionReason,
   ImportBatch,
@@ -33,6 +48,9 @@ type Data = {
   requiredTa: number;
   requiredFt: number;
   prescreenModels: string[];
+  /** Feature usage, driving which methodology blocks appear. */
+  conceptsCount: number;
+  suggestionsCount: number;
   reasons: ExclusionReason[];
   databases: ProjectDatabase[];
   batches: ImportBatch[];
@@ -758,7 +776,7 @@ export default function PrismaClient({ project }: { project: Project }) {
         if (p) profiles.set(m.user_id, p);
       });
       const resolutions = await fetchResolutions(supabase, project.id);
-      // Models the AI prescreen used, for the written summary's
+      // Models the AI prescreen used, for the fact sheet's
       // automation sentence (empty when the prescreen never ran or the
       // table predates migration 0018).
       const prescreenModels = new Set<string>();
@@ -770,6 +788,18 @@ export default function PrismaClient({ project }: { project: Project }) {
           .range(0, 999);
         (ex ?? []).forEach((r) => prescreenModels.add(r.model));
       }
+      // Feature usage counts: which methodology blocks apply to THIS
+      // review. Absent tables (pre-migration) just count zero.
+      const [conceptsQ, suggestionsQ] = await Promise.all([
+        supabase
+          .from("concepts")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", project.id),
+        supabase
+          .from("concept_suggestions")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", project.id),
+      ]);
       const d: Data = {
         records,
         decisions,
@@ -777,6 +807,8 @@ export default function PrismaClient({ project }: { project: Project }) {
         requiredTa: requiredFor(project, "title_abstract"),
         requiredFt: requiredFor(project, "full_text"),
         prescreenModels: [...prescreenModels].sort(),
+        conceptsCount: conceptsQ.count ?? 0,
+        suggestionsCount: suggestionsQ.count ?? 0,
         reasons,
         databases,
         batches,
@@ -1120,9 +1152,9 @@ export default function PrismaClient({ project }: { project: Project }) {
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
   }
 
-  const summary =
+  const factSheet =
     counts && data
-      ? buildPrismaSummary({
+      ? buildPrismaFactSheet({
           searchConfig: project.search_config,
           databases: data.databases,
           counts,
@@ -1132,13 +1164,15 @@ export default function PrismaClient({ project }: { project: Project }) {
           requiredFt: data.requiredFt,
           resolutionsCount: data.resolutions.size,
           prescreenModels: data.prescreenModels,
+          inclusionCriteria: project.inclusion_criteria,
+          reasonLabels: (data.reasons ?? []).map((r) => r.label),
         })
       : null;
 
-  async function copySummary() {
-    if (!summary) return;
+  async function copyFacts() {
+    if (!factSheet) return;
     try {
-      await navigator.clipboard.writeText(summary.join("\n\n"));
+      await navigator.clipboard.writeText(factSheetText(factSheet));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -1146,6 +1180,58 @@ export default function PrismaClient({ project }: { project: Project }) {
       // page stays selectable, so there is nothing more to do here.
     }
   }
+
+  // Document-style section: a ruled heading instead of a boxed card,
+  // matching the manuscript character of this page.
+  const section = "mb-8 border-t border-zinc-200 pt-6 dark:border-zinc-800";
+
+  // Verbatim prompt disclosure, with THIS project's recorded research
+  // question and criteria exactly as the AI features receive them.
+  const rqT = project.research_question ?? null;
+  const incT = project.inclusion_criteria ?? null;
+  const excT = (data?.reasons ?? []).map((r) => `- ${r.label}`).join("\n");
+  const prescreenPrompts = [
+    { label: "Step 1 · criteria-blind extraction", text: extractionPrompt() },
+    ...FRAMINGS.map((f) => ({
+      label: `Vote · ${f} framing`,
+      text: votePrompt(f, rqT, incT, excT),
+    })),
+    {
+      label: "Record text appended to each vote",
+      text: voteUserPrompt(
+        "[record title]",
+        "[record abstract]",
+        "[extracted facts JSON]"
+      ),
+    },
+    {
+      label: "Record text for the facts framing (abstract withheld by design)",
+      text: factsUserPrompt("[record title]", "[extracted facts JSON]"),
+    },
+    {
+      label: "Final safeguard · plausibility check",
+      text: vetoPrompt(rqT, incT, excT),
+    },
+  ];
+  const aipassPrompts = [
+    {
+      label: "Concept pass · system prompt",
+      text: aipassSystemPrompt(rqT, incT),
+    },
+    {
+      label: "Appended concept vocabulary (template)",
+      text: vocabBlock([
+        { label: "[existing concept label]", description: "[its description]" },
+      ]),
+    },
+  ];
+  const usedPrescreen = counts
+    ? counts.db.autoExcluded + counts.other.autoExcluded > 0 ||
+      (data?.prescreenModels.length ?? 0) > 0
+    : false;
+  const usedSnowball = counts ? counts.other.identified > 0 : false;
+  const usedSynthesis = (data?.conceptsCount ?? 0) > 0;
+  const usedAiPass = (data?.suggestionsCount ?? 0) > 0;
 
     
   return (
@@ -1157,14 +1243,14 @@ export default function PrismaClient({ project }: { project: Project }) {
         <button
           onClick={() => window.print()}
           className={`${exportBtn} print:hidden`}
-          title="Prints the diagram, summary, source table, and methodology as a clean document; use the print dialog's Save as PDF for a file"
+          title="Prints the diagram, fact sheet, source table, and methodology as a clean document; use the print dialog's Save as PDF for a file"
         >
           Print / save as PDF
         </button>
       </div>
       <p className="mb-6 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
         Everything the review produces, in one place: the PRISMA 2020 flow
-        diagram, the written methods summary, the exports, and a description
+        diagram, the reporting fact sheet, the exports, and a description
         of the methodology behind this tool for citing and reporting. Every
         number is computed live from the records and decisions; nothing is
         entered by hand.
@@ -1189,7 +1275,7 @@ export default function PrismaClient({ project }: { project: Project }) {
             </p>
           )}
 
-          <section className={`${card} mb-6`}>
+          <section className={section}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Flow diagram
@@ -1215,40 +1301,58 @@ export default function PrismaClient({ project }: { project: Project }) {
             </div>
           </section>
 
-          {summary && (
-            <section className={`${card} mb-6`}>
+          {factSheet && (
+            <section className={section}>
               <div className="mb-1 flex items-center justify-between gap-3">
                 <h2 className="font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                  Written summary
+                  Reporting fact sheet
                 </h2>
                 <button
-                  onClick={copySummary}
+                  onClick={copyFacts}
                   className={`${exportBtn} print:hidden`}
-                  title="Copy the whole summary to the clipboard"
+                  title="Copy the fact sheet as plain text"
                 >
-                  {copied ? "Copied" : "Copy text"}
+                  {copied ? "Copied" : "Copy facts"}
                 </button>
               </div>
               <p className="mb-4 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
-                A methods section draft in PRISMA 2020 reporting style, built
-                from the same live data as the diagram. Paste it into your
-                paper as a starting point and fill in anything shown in
-                [brackets].
+                The verified data behind the diagram, organized by PRISMA
+                2020 checklist item. Draft your methods section in your own
+                words from these facts; anything in [brackets] still needs
+                recording in the app.
               </p>
-              <div className="flex flex-col gap-3">
-                {summary.map((p, i) => (
-                  <p
-                    key={i}
-                    className="font-serif text-[15px] leading-7 text-zinc-800 dark:text-zinc-200"
-                  >
-                    {p}
-                  </p>
+              <div className="flex flex-col gap-5">
+                {factSheet.map((s) => (
+                  <div key={`${s.item}-${s.title}`}>
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                      {s.item} · {s.title}
+                    </p>
+                    <dl className="flex flex-col gap-1">
+                      {s.rows.map((r) => (
+                        <div
+                          key={r.label}
+                          className="grid grid-cols-1 gap-x-4 gap-y-0.5 text-sm sm:grid-cols-[260px_1fr]"
+                        >
+                          <dt className="text-zinc-500 dark:text-zinc-400">
+                            {r.label}
+                          </dt>
+                          <dd className="whitespace-pre-line tabular-nums text-zinc-800 dark:text-zinc-200">
+                            {r.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {s.note && (
+                      <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+                        {s.note}
+                      </p>
+                    )}
+                  </div>
                 ))}
               </div>
             </section>
           )}
-
-          <section className={`${card} mb-6`}>
+          <section className={section}>
             <h2 className="mb-3 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Identification per source
             </h2>
@@ -1279,7 +1383,7 @@ export default function PrismaClient({ project }: { project: Project }) {
             </table>
           </section>
 
-          <section className={`${card} print:hidden`}>
+          <section className={`${section} print:hidden`}>
             <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Exports
             </h2>
@@ -1317,15 +1421,15 @@ export default function PrismaClient({ project }: { project: Project }) {
             </div>
           </section>
 
-          <section className={`${card} mt-6`}>
+          <section className={section}>
             <h2 className="mb-1 font-serif text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               How SimpleSLR works, for your methods section
             </h2>
-            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-              The procedures below describe what this tool actually does, so
-              reviewers of your manuscript can verify the process. Cite
-              SimpleSLR with the version date and reproduce whichever
-              descriptions apply to your review.
+            <p className="mb-4 text-sm text-zinc-600 print:hidden dark:text-zinc-400">
+              What this tool actually did in this review, so reviewers of
+              your manuscript can verify the process. Only the procedures
+              this review used are shown; cite SimpleSLR with the version
+              date and reference the descriptions that apply.
             </p>
             <div className="flex flex-col gap-3 font-serif text-[14.5px] leading-7 text-zinc-700 dark:text-zinc-300">
               <div>
@@ -1356,72 +1460,83 @@ export default function PrismaClient({ project }: { project: Project }) {
                   resolution is timestamped in the exportable screening log.
                 </p>
               </div>
-              <div>
-                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
-                  Automated prescreening (optional)
-                </h3>
-                <p>
-                  When enabled, each unscreened title and abstract is judged
-                  by five procedurally distinct prompts on fixed, prescribed
-                  language models at temperature zero. A record is removed
-                  only when all five votes conclude exclude, cite the same
-                  criterion from the project&apos;s own list, and quote verbatim
-                  evidence from the record&apos;s text, and a final adversarial
-                  check finds no plausible eligible reading. Errors and
-                  ambiguity default to human screening; removals are counted
-                  on the PRISMA line for automation tools, remain visible
-                  with their full vote record, and are restorable. A
-                  validation mode replays the pipeline on human-screened
-                  records to measure agreement before live use.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
-                  Citation searching
-                </h3>
-                <p>
-                  Backward and forward snowballing from the included set
-                  (Webster and Watson), via OpenAlex or database exports,
-                  with per-seed provenance recorded. Papers already in the
-                  corpus are consolidated onto their existing record rather
-                  than duplicated, and identification counts follow the
-                  PRISMA 2020 two-arm layout.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
-                  Synthesis
-                </h3>
-                <p>
-                  Concept-centric coding in the Webster and Watson style:
-                  passages are anchored verbatim to the source PDF, and the
-                  concept matrix is built from those anchored excerpts.
-                  Optional AI-suggested passages are quarantined until a
-                  researcher individually accepts or rejects each one, and
-                  suggested quotes are verified verbatim against the
-                  extracted text before they can appear.
-                </p>
-              </div>
+              {usedPrescreen && (
+                <div>
+                  <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
+                    Automated prescreening
+                  </h3>
+                  <p>
+                    Each unscreened title and abstract is judged by five
+                    procedurally distinct prompts on fixed, prescribed
+                    language models at temperature zero. A record is removed
+                    only when all five votes conclude exclude, cite the same
+                    criterion from the project&apos;s own list, and quote verbatim
+                    evidence from the record&apos;s text, and a final adversarial
+                    check finds no plausible eligible reading. Errors and
+                    ambiguity default to human screening; removals are counted
+                    on the PRISMA line for automation tools, remain visible
+                    with their full vote record, and are restorable. A
+                    validation mode replays the pipeline on human-screened
+                    records to measure agreement before live use.
+                  </p>
+                  <PromptDisclosure
+                    title="the exact prompts"
+                    intro={`Prompt version ${PRESCREEN_PROMPT_VERSION}, temperature 0${
+                      (data?.prescreenModels.length ?? 0) > 0
+                        ? `, models: ${data?.prescreenModels.join(", ")}`
+                        : ""
+                    }. These are the verbatim instruction texts sent to the models, with this project's research question and criteria exactly as recorded; bracketed placeholders mark where each record's own text is inserted.`}
+                    prompts={prescreenPrompts}
+                  />
+                </div>
+              )}
+              {usedSnowball && (
+                <div>
+                  <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
+                    Citation searching
+                  </h3>
+                  <p>
+                    Backward and forward snowballing from the included set
+                    (Webster and Watson), via OpenAlex or database exports,
+                    with per-seed provenance recorded. Papers already in the
+                    corpus are consolidated onto their existing record rather
+                    than duplicated, and identification counts follow the
+                    PRISMA 2020 two-arm layout.
+                  </p>
+                </div>
+              )}
+              {usedSynthesis && (
+                <div>
+                  <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
+                    Synthesis
+                  </h3>
+                  <p>
+                    Concept-centric coding in the Webster and Watson style:
+                    passages are anchored verbatim to the source PDF, and the
+                    concept matrix is built from those anchored excerpts.
+                    {usedAiPass &&
+                      " AI-suggested passages are quarantined until a researcher individually accepts or rejects each one, and suggested quotes are verified verbatim against the extracted text before they can appear."}
+                  </p>
+                  {usedAiPass && (
+                    <PromptDisclosure
+                      title="the exact concept pass prompt"
+                      intro="The verbatim system prompt of the optional AI concept pass, with this project's research question and criteria as recorded. The paper's extracted text, labeled by page, is sent as the user message alongside the vocabulary below."
+                      prompts={aipassPrompts}
+                    />
+                  )}
+                </div>
+              )}
               <div>
                 <h3 className="font-serif font-semibold text-zinc-900 dark:text-zinc-50">
                   Reporting
                 </h3>
                 <p>
-                  The PRISMA 2020 flow diagram and the written summary above
-                  are computed from the recorded decisions, count only
+                  The PRISMA 2020 flow diagram and the reporting fact sheet
+                  above are computed from the recorded decisions, count only
                   settled team outcomes, and report optional features only
                   when they were actually used.
                 </p>
               </div>
-              <p className="font-sans text-xs text-zinc-500 print:hidden dark:text-zinc-400">
-                Questions about any of these procedures:{" "}
-                <a
-                  href="mailto:support@simpleslr.de"
-                  className="underline underline-offset-2"
-                >
-                  support@simpleslr.de
-                </a>
-              </p>
             </div>
           </section>
         </>
